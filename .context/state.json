@@ -2,7 +2,7 @@
   "project": "autoclip",
   "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M1-infrastructure-COMPLETE (8/8 tasks + 6 rounds self-check sealed; ready for e2e acceptance)",
+  "phase": "M1-infrastructure-COMPLETE (8/8 tasks + 10 rounds self-check sealed via LIM#9 + LIM#8 FIXED in M2a-kickoff cleanup; ready for e2e acceptance)",
   "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
@@ -215,13 +215,25 @@
       "discovered_in": "Round 10 of M1.8 self-check (post-e8738c2)"
     },
     "LIM_8_runner_protocol_docstring_drift": {
-      "where": "src/autoclip/pipeline/runner.py L48-50",
-      "issue": "StageHandler Protocol docstring says 'Handler must mark its own RUNNING and DONE/FAILED' but L142 _stage_entrypoint already calls mark_stage(stage, RUNNING, progress=0.0) BEFORE invoking handler. This caused M1.8 Round 3 BUG#7 (I added redundant mark_stage(RUNNING) in handler per docstring instruction).",
-      "blast_radius": "next handler author (M2a scripting / M2b assembly / M3 render) reading the same docstring will repeat BUG#7",
-      "fix": "rewrite docstring: 'Handler MUST mark its own DONE/FAILED via JobStateFile, but RUNNING is owned by the entrypoint and should NOT be re-marked by the handler.'",
-      "fix_when": "M2a kickoff tech debt cleanup (before writing scripting handler)",
+      "status": "FIXED at M2a kickoff tech debt cleanup (post-M1, pre-M2a)",
+      "fix_commit": "<this commit>",
+      "where": "src/autoclip/pipeline/runner.py L48-50 (originally) → L48-77 (after fix, expanded to 30 lines covering 4 contract clauses)",
+      "issue": "StageHandler Protocol docstring said 'Handler must mark its own RUNNING and DONE/FAILED' but _stage_entrypoint already calls mark_stage(stage, RUNNING, progress=0.0) BEFORE invoking handler. Caused M1.8 Round 3 BUG#7 (I added redundant mark_stage(RUNNING) in handler per docstring instruction).",
+      "blast_radius_avoided": "next handler author (M2a scripting / M2b assembly / M3 render) reading the same docstring would have repeated BUG#7",
+      "fix_summary": "Rewrote docstring with 4 explicit contract clauses: (1) RUNNING(progress=0.0) is OWNED BY entrypoint, handlers MUST NOT re-mark; (2) RUNNING(progress>0.0) is handler-owned for milestone reports; (3) DONE handlers SHOULD self-mark, entrypoint has defensive safety net; (4) FAILED entrypoint catches all exceptions, handlers MAY self-mark for richer context but not required. Plus added 4 reverse-assertion contract tests to test_runner.py: test_entrypoint_marks_running_before_handler_invoked + test_entrypoint_catches_failed_when_handler_does_not_self_mark + test_entrypoint_defensive_done_safety_net_when_handler_silent + test_entrypoint_preserves_handler_progress_reports. Per Round 4 lesson: positive+negative test pairs prevent condition-widening regressions in future entrypoint refactors.",
+      "fix_verification": "pytest tests/ 181 passed → 185 passed + 6 skipped (4 new contract tests all pass); ruff default config All checks passed; existing handlers ingest.py L18-25 + index.py L24-30 already had local contract notes consistent with new docstring (no source change needed for existing handlers)",
       "introduced_in": "M1.4 (initial _stage_entrypoint design)",
-      "discovered_in": "M1.8 self-check Round 5"
+      "discovered_in": "M1.8 self-check Round 5",
+      "fixed_in": "M2a kickoff tech debt cleanup (this commit)"
+    },
+    "LIM_10_test_runner_isolation_via_load_stage_modules": {
+      "where": "src/autoclip/pipeline/runner.py _stage_entrypoint L86 (calls _load_stage_modules) + tests/unit/test_runner.py:test_stage_entrypoint_marks_done_on_success L114",
+      "issue": "test_stage_entrypoint_marks_done_on_success registers a lambda for INGEST stage, then calls _stage_entrypoint, but entrypoint internally calls _load_stage_modules() which imports autoclip.pipeline.ingest, which calls register_stage_handler(INGEST, run_ingest) overwriting the test's lambda (last-wins). When run as `pytest tests/unit/test_runner.py` standalone, the test FAILS (real run_ingest is invoked, raises IngestError because raw/ dir is missing). When run as part of `pytest tests/` (full suite), it PASSES — likely because some other test's import order or monkeypatch happens to leave the lambda in place. This is a pre-existing test isolation bug from M1.4, NOT introduced by LIM#8 fix.",
+      "blast_radius": "low — only the standalone test_runner.py invocation pattern is affected; CI runs the full suite which passes; developers running single-file pytest may see false negatives",
+      "fix_options": "(a) make _clean_handlers fixture re-clear handlers AFTER _load_stage_modules runs, (b) add a test-only env var to skip _load_stage_modules in entrypoint, (c) refactor entrypoint to accept handler-source as injectable parameter. Option (b) is cheapest; option (c) is cleanest",
+      "fix_when": "M2a kickoff or whenever first developer notices the standalone-failure mode",
+      "introduced_in": "M1.4 (entrypoint design choice to re-load handlers in subprocess)",
+      "discovered_in": "M2a kickoff during LIM#8 fix verification (this commit)"
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",

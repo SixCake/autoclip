@@ -47,8 +47,36 @@ with contextlib.suppress(RuntimeError):
 
 StageHandler = Callable[[Path], None]
 """Signature: handler(job_dir: Path) -> None
-   Handler must mark its own RUNNING and DONE/FAILED states via JobStateFile.
-   On exception, the entrypoint will catch and mark FAILED."""
+
+State transition contract (as of M1.8 LIM#8 fix; verified against `_stage_entrypoint`):
+
+- RUNNING(progress=0.0) — initial transition is OWNED BY ``_stage_entrypoint``,
+  which calls ``mark_stage(stage, RUNNING, progress=0.0)`` BEFORE invoking the
+  handler. Handlers MUST NOT call ``mark_stage(RUNNING, progress=0.0)`` themselves;
+  doing so is a redundant atomic write and muddles ownership of ``started_at``.
+
+- RUNNING(progress>0.0) — handlers MAY call ``mark_stage(stage, RUNNING,
+  progress=N)`` at sub-stage milestones to report progress (e.g. ingest.py uses
+  0.05 / 0.45 / 0.85 / 0.95; index.py uses 0.3 / 0.95). The progress field is
+  ``set`` not ``monotonic`` (see LIM#7) — callers should write monotonically by
+  convention.
+
+- DONE — handlers SHOULD call ``mark_stage(stage, DONE)`` at the end of
+  successful execution. ``_stage_entrypoint`` has a defensive safety net that
+  marks DONE if the handler returns without doing so, but handlers should not
+  rely on it (the safety net exists to prevent silent state corruption, not as
+  a feature).
+
+- FAILED — handlers SHOULD raise an exception on failure; ``_stage_entrypoint``
+  catches all exceptions, calls ``mark_stage(stage, FAILED, error=...)``, and
+  exits with code 1. Handlers MAY call ``mark_stage(FAILED)`` themselves before
+  raising (e.g. for richer error context), but this is not required — the
+  entrypoint's catch-all is the canonical FAILED transition.
+
+Cancellation: handlers should call ``raise_if_cancelled(state)`` (or equivalent)
+at safe checkpoints. Cancellation is delivered as an exception that the
+entrypoint catches and marks FAILED with a recognizable error message.
+"""
 
 _STAGE_HANDLERS: dict[Stage, StageHandler] = {}
 

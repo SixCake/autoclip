@@ -165,6 +165,111 @@ def test_stage_entrypoint_handler_marks_done_explicitly(job_dir: Path):
 
 
 # ---------------------------------------------------------------------------
+# Tests — StageHandler contract (LIM#8 fix; see runner.StageHandler docstring)
+#
+# These tests pin down the 4 contract claims so future handler authors and
+# future entrypoint refactors can't silently violate the docstring.
+# ---------------------------------------------------------------------------
+
+def test_entrypoint_marks_running_before_handler_invoked(job_dir: Path):
+    """Contract clause 1 (RUNNING ownership): entrypoint marks
+    RUNNING(progress=0.0) BEFORE the handler runs, so the handler can observe
+    its own RUNNING state from the very first instruction (proving started_at
+    is already stamped by the entrypoint, not the handler)."""
+    observed_at_handler_entry: dict[str, object] = {}
+
+    def observing_handler(jd: Path) -> None:
+        slot = JobStateFile(jd).load()["stages"][Stage.INGEST.value]
+        observed_at_handler_entry["status"] = slot["status"]
+        observed_at_handler_entry["progress"] = slot["progress"]
+        observed_at_handler_entry["started_at"] = slot["started_at"]
+
+    register_stage_handler(Stage.INGEST, observing_handler)
+    _stage_entrypoint(Stage.INGEST.value, str(job_dir))
+
+    # Positive: handler observed RUNNING(0.0) on entry
+    assert observed_at_handler_entry["status"] == StageStatus.RUNNING.value
+    assert observed_at_handler_entry["progress"] == 0.0
+    # Reverse: started_at was NOT None when the handler started running, i.e.
+    # the entrypoint stamped it, NOT the handler. This is the test that would
+    # have caught the Round 3 BUG#7 misconception (handler "must" mark RUNNING).
+    assert observed_at_handler_entry["started_at"] is not None
+
+
+def test_entrypoint_catches_failed_when_handler_does_not_self_mark(job_dir: Path):
+    """Contract clause 4 (FAILED ownership): entrypoint catches the exception
+    and marks FAILED on its own; handler does NOT need to call mark_stage(FAILED)
+    before raising. This is the canonical FAILED transition."""
+    def silent_failing_handler(jd: Path) -> None:
+        # Note: deliberately does NOT call mark_stage(FAILED) before raising.
+        # Per docstring contract, the entrypoint's catch-all is canonical.
+        raise RuntimeError("handler crashed without self-marking FAILED")
+
+    register_stage_handler(Stage.INGEST, silent_failing_handler)
+    with pytest.raises(SystemExit) as exc_info:
+        _stage_entrypoint(Stage.INGEST.value, str(job_dir))
+    assert exc_info.value.code == 1
+
+    slot = JobStateFile(job_dir).load()["stages"][Stage.INGEST.value]
+    # Positive: status is FAILED with handler's exception info
+    assert slot["status"] == StageStatus.FAILED.value
+    assert "RuntimeError" in slot["error"]
+    assert "handler crashed without self-marking FAILED" in slot["error"]
+    # Reverse: the handler did NOT mark FAILED itself, yet status is still
+    # FAILED — proves the entrypoint owns this transition.
+
+
+def test_entrypoint_defensive_done_safety_net_when_handler_silent(job_dir: Path):
+    """Contract clause 3 (DONE safety net): if a handler returns successfully
+    WITHOUT calling mark_stage(DONE), the entrypoint marks DONE on its behalf
+    rather than leaving status stuck at RUNNING. Documented in docstring as a
+    safety net (not a feature handlers should rely on)."""
+    def silent_succeeding_handler(jd: Path) -> None:
+        # Returns successfully WITHOUT calling mark_stage(DONE).
+        # Should NOT happen in well-written handlers, but the entrypoint must
+        # handle it to prevent silent state corruption.
+        return
+
+    register_stage_handler(Stage.INGEST, silent_succeeding_handler)
+    _stage_entrypoint(Stage.INGEST.value, str(job_dir))
+
+    slot = JobStateFile(job_dir).load()["stages"][Stage.INGEST.value]
+    # Positive: status is DONE despite handler not marking it
+    assert slot["status"] == StageStatus.DONE.value
+    # Reverse: status is NOT stuck at RUNNING (which would be the case if the
+    # safety net didn't fire) — this catches a future regression where someone
+    # removes the L147-150 defensive block in _stage_entrypoint.
+    assert slot["status"] != StageStatus.RUNNING.value
+
+
+def test_entrypoint_preserves_handler_progress_reports(job_dir: Path):
+    """Contract clause 2 (RUNNING(progress>0.0) handler-owned): handler may
+    call mark_stage(RUNNING, progress=N) at sub-stage milestones, and the
+    entrypoint must NOT overwrite those reports with its own RUNNING(0.0).
+    The entrypoint marks RUNNING(0.0) ONCE before the handler runs; afterwards
+    progress >0.0 belongs to the handler."""
+    progress_observations: list[float] = []
+
+    def progressing_handler(jd: Path) -> None:
+        state = JobStateFile(jd)
+        for milestone_progress in (0.25, 0.5, 0.75):
+            state.mark_stage(Stage.INGEST, StageStatus.RUNNING, progress=milestone_progress)
+            after = state.load()["stages"][Stage.INGEST.value]["progress"]
+            progress_observations.append(after)
+        state.mark_stage(Stage.INGEST, StageStatus.DONE, progress=1.0)
+
+    register_stage_handler(Stage.INGEST, progressing_handler)
+    _stage_entrypoint(Stage.INGEST.value, str(job_dir))
+
+    # Positive: every milestone the handler wrote was preserved (no
+    # entrypoint clobbering between handler writes)
+    assert progress_observations == [0.25, 0.5, 0.75]
+    final_slot = JobStateFile(job_dir).load()["stages"][Stage.INGEST.value]
+    assert final_slot["status"] == StageStatus.DONE.value
+    assert final_slot["progress"] == 1.0
+
+
+# ---------------------------------------------------------------------------
 # Tests — PipelineRunner.run() scheduling logic (mocked subprocesses)
 # ---------------------------------------------------------------------------
 
