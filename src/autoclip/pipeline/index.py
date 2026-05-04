@@ -123,8 +123,13 @@ def _load_existing_shots(shots_path: Path) -> list[Shot] | None:
             for s in payload["shots"]
         ]
     except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
-        # Note: json.JSONDecodeError is a subclass of ValueError; listed
-        # explicitly for clarity. OSError is intentionally NOT caught here.
+        # Three classes of error all collapse to "data is corrupt → re-detect":
+        #   - json.JSONDecodeError (subclass of ValueError): malformed JSON
+        #   - ValueError: int()/float() coercion fails OR Shot.__post_init__
+        #     business-rule violation (idx<0, start_sec<0, end_sec<=start_sec)
+        #     — both indicate the prior write produced garbage
+        #   - KeyError / TypeError: missing/wrong-typed schema fields
+        # OSError is intentionally NOT caught here — see docstring.
         logger.warning(
             "[index] existing {} unreadable ({}); will re-detect",
             shots_path.name,
@@ -244,6 +249,19 @@ def run_index(job_dir: Path) -> None:
         asr_result.language,
         asr_result.provider,
     )
+    # Empty sentences is technically legal (e.g. silent / music-only source, or
+    # tiny whisper model on a short clip per integration test docstring), but
+    # it nearly always means downstream M2a scripting will have NOTHING to work
+    # with — surface a loud warning so operators can investigate before the
+    # next stage fails opaquely with "no dialogue available".
+    if not asr_result.sentences:
+        logger.warning(
+            "[index] ASR produced 0 sentences for {} (provider={}, language={}); "
+            "M2a scripting will receive empty dialogue — verify audio is not silent",
+            audio_path.name,
+            asr_result.provider,
+            asr_result.language,
+        )
     state.mark_stage(Stage.INDEX, StageStatus.RUNNING, progress=0.95)
 
     # --- Step 3: K9 zero-knowledge — delete audio.wav (progress 1.0) ---

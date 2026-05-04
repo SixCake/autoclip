@@ -349,6 +349,88 @@ def test_run_index_happy_path_full_flow(job_dir: Path):
     assert index_slot["progress"] == 1.0
 
 
+def test_run_index_empty_asr_logs_warning_but_succeeds(job_dir: Path, caplog):
+    """ASR returning 0 sentences must be logged as WARNING but not raise.
+
+    Empty sentences is technically legal (silent / music-only / very-short
+    source). Per LocalWhisperProvider._postprocess_segments, all-noise audio
+    can legitimately produce zero sentences after low-confidence filtering.
+    But it nearly always means M2a scripting will get NOTHING — so the handler
+    must surface a loud WARNING (not just an INFO log) to help operators
+    distinguish "audio was bad" from "ASR is broken".
+    """
+    import logging
+
+    fake_provider = MagicMock()
+    # Empty ASRResult — 0 sentences but otherwise well-formed
+    fake_provider.transcribe.return_value = _make_asr_result(0)
+
+    with (
+        patch("autoclip.pipeline.index.detect_shots", return_value=_make_shots(2)),
+        patch("autoclip.pipeline.index._build_asr_provider", return_value=fake_provider),
+        caplog.at_level(logging.WARNING, logger="autoclip"),
+    ):
+        # loguru → caplog requires a propagation shim; use loguru's own capture instead
+        from loguru import logger as loguru_logger
+
+        captured: list[str] = []
+        sink_id = loguru_logger.add(
+            lambda msg: captured.append(str(msg)),
+            level="WARNING",
+            format="{message}",
+        )
+        try:
+            run_index(job_dir)
+        finally:
+            loguru_logger.remove(sink_id)
+
+    # Stage must still complete successfully (empty ASR is not a failure)
+    final = JobStateFile(job_dir).load()["stages"][Stage.INDEX.value]
+    assert final["status"] == StageStatus.DONE.value
+    assert final["progress"] == 1.0
+
+    # asr.json was still written (with empty sentences)
+    asr_payload = json.loads((job_dir / ASR_FILENAME).read_text(encoding="utf-8"))
+    assert asr_payload["sentences"] == []
+
+    # And the warning was actually emitted
+    assert any("ASR produced 0 sentences" in m for m in captured), (
+        f"expected an 'ASR produced 0 sentences' WARNING; "
+        f"captured warnings: {captured}"
+    )
+
+
+def test_run_index_nonempty_asr_does_not_log_empty_warning(job_dir: Path):
+    """Negative: when ASR has ≥1 sentence, the empty-ASR warning must NOT fire.
+
+    Reverse-assertion guard: prevents future regression where someone
+    accidentally widens the `if not asr_result.sentences` condition.
+    """
+    fake_provider = MagicMock()
+    fake_provider.transcribe.return_value = _make_asr_result(2)  # NON-empty
+
+    from loguru import logger as loguru_logger
+
+    captured: list[str] = []
+    sink_id = loguru_logger.add(
+        lambda msg: captured.append(str(msg)),
+        level="WARNING",
+        format="{message}",
+    )
+    try:
+        with (
+            patch("autoclip.pipeline.index.detect_shots", return_value=_make_shots(2)),
+            patch("autoclip.pipeline.index._build_asr_provider", return_value=fake_provider),
+        ):
+            run_index(job_dir)
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert not any("ASR produced 0 sentences" in m for m in captured), (
+        f"empty-ASR warning fired despite 2 sentences; captured: {captured}"
+    )
+
+
 def test_run_index_progress_milestones(job_dir: Path):
     """Verify mark_stage is called with the design-spec progress values.
 

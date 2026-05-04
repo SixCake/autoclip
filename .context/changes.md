@@ -823,3 +823,27 @@ User in pre-M1.5 phase:
 - **dead code 是多轮自检最大的盲区**: 它不影响功能(测试照过)、不报 lint(ruff 全绿)、阅读时容易因"看起来像有意为之"(那条注释 `# quiet ruff` 给了 false sense of intent) 而被跳过. Round 1-4 我都看过 test_index_handler.py 这两个函数, 但每次都被那条**伪解释性注释**误导, 以为 `_ = state` 是必要的. **真正消除 dead code 的唯一方法是 dry-run 实测删除后看是否还能通过所有检查**, 不能依赖代码推理或工具报告
 - **跨 milestone 的 contract drift 是 self-check 的边界**: LIM#8 不是 M1.8 的 bug, 但它**导致了** M1.8 Round 3 的 BUG#7. 这意味着 self-check 不能只看"当前 milestone 改了什么", 还要看"我做决策时依赖了哪些历史模块的契约文档, 这些文档准确吗". 但同时不能漫无边际去修历史模块 (会破坏 commit 隔离). 折中: 记录为 LIM, 在下一个相关 milestone 的 kickoff (M2a tech debt cleanup 段) 一并修, 避免污染当前提交
 - **每轮自检 bug 数: 1→5→3+1regression→1+1LIM**. Round 5 比 Round 4 少了一半, 趋势确实在收敛. **但收敛不等于零**: Round 5 还能找到 1 处必修 + 1 处 contract drift, 说明只要还在追问, 就还有东西可挖. 真正的"完成"信号不是"找不到 bug", 而是**当前 milestone scope 内的代码已经过逐行 read + 跨模块契约对齐 + dry-run 实测**, 且找到的 out-of-scope 问题已经被记录为 LIM 等待对应 milestone 处理
+
+### Post-Implementation Self-Check Round 6 (用户第五次主动追问触发, 首次完整 read 被依赖模块)
+**触发**: 用户**第五次**输入完全相同的自检问题. 这次按 Round 3→4 的核心教训 (**"called API ≠ knows contract", 必须 read 真实被调方实现**), 首次完整 read 了 4 个**之前从未真正读过实现细节的被依赖模块**: algo/shot_detector.py 全文 (Shot dataclass + detect_shots) + providers/asr/local_whisper.py 全文 (LocalWhisperProvider.transcribe + _postprocess_segments) + providers/asr/base.py 全文 (ASRProvider/ASRResult/ASRSentence schema) + tests/integration/test_index.py 全文 (Round 2 重写后 4 轮没再 review)
+
+**发现 2 处 should-fix (注释陷阱 + 可观测性盲区)**:
+- **6-1 _load_existing_shots except 注释不完整 → 误导未来 reviewer** (index.py:120-127): 原注释只解释了 `json.JSONDecodeError is subclass of ValueError`, 但 read shot_detector.py 的 Shot.__post_init__ (L60-67) 后才发现: Shot 的 `idx<0 / start_sec<0 / end_sec<=start_sec` 三个业务规则都用 ValueError 表达. 当前 _load_existing_shots 把这三种业务规则违反当作"corrupt → re-detect"处理是**逻辑正确的** (业务规则违反 = 数据损坏), 但注释完全没体现这一点, 后续 reviewer 容易误以为 "Shot 业务规则违反被吞咽是漏处理". 修复: 改写注释明确列出三类被吞咽的 ValueError (json 解析 / 类型转换 / Shot 业务规则), OSError 仍然不在列表
+- **6-2 ASR 空 sentences 静默写入 → operator 无法定位** (index.py:225-232 → 233-241): 原代码无条件 `_atomic_write_json(asr_path, asr_result.to_dict())` + 一条 INFO log `n_sentences={...}`. 但 read LocalWhisperProvider._postprocess_segments (L143-179) 后发现: provider 会基于 3 条 drop rules (空文本 / avg_logprob<-1.0 / duration<1s且text<4字) **静默丢弃 segments**, 极端情况 (整段低置信度音频) 完全可能返回 0 sentences. 同时 integration test test_run_index_end_to_end_real_whisper:92 的注释明确说 "tiny model on a short clip may legitimately produce 0 sentences (only silence)" — 所以**空 sentences 不是 failure**, 不能 raise IndexStageError. 但与 shots 空 → IndexStageError 形成**不对称**: shots 空 → 立即 fail, sentences 空 → 静默通过. 修复: 写入后增加 `if not asr_result.sentences: logger.warning(...)`, 让 operator 在 M2a scripting 拿到空对话时能立刻定位"是 ASR 空, 不是 scripting 坏". WARNING 级别 + 信息丰富的消息 (provider/language/audio_path.name + "verify audio is not silent" 提示)
+
+**发现 3 处 NOT-bug 排除 (避免过度修复 + 记录排除理由)**:
+- ✗ provider.transcribe 内部 `if not audio_path.exists(): raise FileNotFoundError` (local_whisper.py:122-123): index.py pre-flight 已经检查过, 看似冗余. 但 LocalWhisperProvider 是**独立可复用的 provider**, 必须自己保护 API 边界 (其他调用方未必有 pre-flight). 双层防御是合理设计, 不修
+- ✗ integration test_run_index_end_to_end 没断言 shots.json 的 total_duration_sec 字段: 故意只做"结构性断言"是 design intent (不耦合具体 PySceneDetect 输出数值, 否则任何 PySceneDetect 升级都会 fail), 不修
+- ✗ integration test_run_index_resume_reuses_shots_json 用 `st_mtime_ns` 严格相等断言: APFS 纳秒精度 + 两次 run 之间至少隔一次 ASR transcribe + audio.unlink (时间差远大于 ns 粒度), 不会假阳性. 而且 bytes 相等 + mtime 相等的双重断言比单 mtime 更可靠 (即便 _atomic_write_json 被误调, _shots_to_payload 确定性输出会让 bytes 也相等 — 但 mtime 一定会变, 双断言闭环). 设计正确, 不修
+
+**Round 6 修复后验证**:
+- 新增 2 个单测 (test_run_index_empty_asr_logs_warning_but_succeeds 正向 + test_run_index_nonempty_asr_does_not_log_empty_warning 反向): 都 PASSED. 用 loguru `logger.add(sink_callable)` + `level="WARNING"` 抓取 warning, 因为 loguru 默认不通过 stdlib logging 传播, 不能直接用 caplog
+- pytest 全量回归: 179 → 181 passed + 6 skipped (净增 +2 单测覆盖新行为)
+- ruff default + ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- read_lints: No lint errors found
+
+**Round 6 最深教训**:
+- **"被依赖模块的实现细节"才是 self-check 的金矿**: 前 5 轮我反复 read 同一组文件 (index.py + test_index_handler.py), 边际收益递减. Round 6 把视野扩展到**被 index.py 调用的 4 个模块的真实实现** (Shot.__post_init__ 业务规则 / _postprocess_segments 的 3 条 drop rules / ASRResult schema / integration test 的"empty is legal"注释), 立刻发现 2 处真问题. **跨模块调用层是多轮自检最容易被忽略的死角**, 因为大家默认"调过的 API 应该懂", 但 Round 3→4 BUG#10 已经证明这是错的
+- **"对称性破坏"是潜在的可观测性 bug 信号**: shots 空→raise vs sentences 空→静默, 这种**类似输入的不对称处理**在源码 review 时很难看出来 (单独看每行都合理), 但在跨模块 contract 视角下很显眼. 后续约定: 当一个 handler 处理多类相似输入时, 必须主动审视"我对它们的处理策略是否对称, 不对称的差异有没有文档化"
+- **测试反向断言扩展**: Round 4 我学到"测试要主动反向断言". Round 6 进一步实践: 给 empty-ASR warning 同时加了 (a) 正向断言 `any("ASR produced 0 sentences" in m for m in captured)` (b) 反向断言 `not any(... in m for m in captured)` 的姊妹测试. 这种"正反双单测"模式比单一断言更能防止"if 条件被误改宽"的回归
+- **每轮自检 bug 数: 1→5→3+1regression→1+1LIM→2 should-fix**. Round 6 比 Round 5 略增 (1→2), 因为这轮扩展了 scope 到被依赖模块. **bug 数趋势不是单调下降**, 一旦扩展 scope 就会再发现一批. 真正的收敛信号是**"扩展 scope 后仍然找不到 must-fix"**, 当前还没到那个点 (Round 6 找到的是 should-fix 注释/可观测性, 不是功能 bug, 比 Round 1-3 的 must-fix 量级低)
