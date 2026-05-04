@@ -5,9 +5,9 @@
 
 **Goal**: 在 5-6 周内实现一个端到端可用的影视/电视剧/动漫二创解说视频生成器 MVP — 用户上传单部影片，系统输出可直接在剪映中打开的草稿包。
 
-**权威设计文档**: [`./2026-05-04-autoclip-design.md`](./2026-05-04-autoclip-design.md)（v0.3，2107 行；冲突时以 Part III §16-§20 为准）
+**权威设计文档**: [`./2026-05-04-autoclip-design.md`](./2026-05-04-autoclip-design.md)（v0.4，2282 行；冲突时以 Part IV §21-§23 为准）
 
-**Tech Stack 速览**: Python 3.11 + FastAPI + SQLite + multiprocessing + 阿里云 ASR + 通义千问 + 火山豆包 TTS + pyJianYingDraft
+**Tech Stack 速览**: Python 3.11 + FastAPI + SQLite + multiprocessing + **本地 faster-whisper（v0.4）** + 通义千问 + 火山豆包 TTS + pyJianYingDraft
 
 ---
 
@@ -138,7 +138,9 @@ autoclip/
 
 ### 5.3 环境变量
 
-执行任何 task 前，先确保 `.env` 包含：`DASHSCOPE_API_KEY`, `ALIYUN_ACCESS_KEY_ID`, `ALIYUN_ACCESS_KEY_SECRET`, `ALIYUN_ASR_APPKEY`, `VOLCENGINE_TTS_APPID`, `VOLCENGINE_TTS_TOKEN`, `AUTOCLIP_DATA_DIR`。模板见 `.env.example`（M1.1 创建）。
+执行任何 task 前，先确保 `.env` 包含：`DASHSCOPE_API_KEY`, `VOLCENGINE_TTS_APP_ID`, `VOLCENGINE_TTS_TOKEN`, `DATA_DIR`。
+
+**v0.4 变更**：原 v0.3 要求的 `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` / `ALIYUN_ASR_APPKEY` / `ALIYUN_ASR_TOKEN` 已**全部移除**（本地 ASR 不需凭证）；新增可选项 `WHISPER_MODEL_SIZE` / `WHISPER_DEVICE` / `WHISPER_COMPUTE_TYPE`（默认值 `large-v3` / `auto` / `default`）。模板见 `.env.example`（M1.1 创建，本次 adhoc 同步更新）。
 
 ---
 
@@ -203,7 +205,10 @@ autoclip/
 | ID | 风险 | 概率 | 影响 | 缓解策略 | 状态 |
 |---|---|---|---|---|---|
 | R1 | pyJianYingDraft 库不维护 / 与最新剪映版本不兼容 | 🟡 中 | 🔴 高 | M3.6 JsonTimelineExporter 防御实现 | 监控中 |
-| R2 | 阿里云 ASR 长视频接口限速 | 🟢 低 | 🟡 中 | 90min 拆 3 段并行；失败重试 | 待 M1 验证 |
+| R2 | ~~阿里云 ASR 长视频接口限速~~ | — | — | **v0.4 解除**（已切本地 faster-whisper） | ✅ 已解决 |
+| R15 | faster-whisper 模型权重首次下载慢/失败 | 🟡 中 | 🟡 中 | M1.5 提供 `scripts/preload_whisper.py`；CI 缓存 | 待 M1.5 验证 |
+| R16 | LLM 角色推断在多人混淆场景出错（ADR-009 路径 2） | 🟡 中 | 🟢 低 | M2a.2 prompt 加 few-shot；v1.1 加声纹兜底 | 待 M2a 验证 |
+| R17 | 低配 Mac 跑 large-v3 内存爆 | 🟢 低 | 🟡 中 | Settings 暴露 model_size 配置项，文档建议降到 medium | 待 M1.5 验证 |
 | R3 | LLM 幻觉 evidence_keywords | 🟡 中 | 🔴 高 | M2b post-validation 反向校验兜底 | 待 M2b 验证 |
 | R4 | macOS spawn 模式下子进程模型加载慢 | 🟡 中 | 🟢 低 | 子进程内独立加载；进程池复用 | 待 M1 验证 |
 | R5 | KPI（K1-K3）不达标导致 MVP 延期 | 🟡 中 | 🟡 中 | Week 6 buffer 兜底；P0 KPI 严守 | 待 M2b 验证 |
@@ -217,4 +222,5 @@ autoclip/
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-05-04 | v0.1 | 初始总控文档创建（替代旧的 3847 行实现代码版） |
+| 2026-05-04 | v0.2 | adhoc：ASR 改本地 faster-whisper + large-v3（design.md Part IV §21）；MVP 加 LLM 推断角色（§22 ADR-009）；M1.5 工期 1d→0.5d；总工期 -0.5d；R2 解除，新增 R15/R16/R17 |
 

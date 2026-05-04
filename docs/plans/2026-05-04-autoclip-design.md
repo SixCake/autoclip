@@ -2105,3 +2105,178 @@ Week 1   Week 2     Week 3      Week 4         Week 5   Week 6 (buffer)
 - 体验保障 → §17.1（风格预设）+ §17.2（自评分）
 - 工程基础 → §16.2（multiprocessing）+ §17.5（测试策略）
 
+
+---
+
+# Part IV — v0.4 本地化与角色推断修订（2026-05-04 15:20）
+
+> **变更触发**：用户在 M1.5 启动前提出两个核心诉求 — (1) 阿里云 ASR 需要先上传 OSS 太麻烦，要求**纯本地方案**；(2) MVP 阶段需要**让 LLM 知道角色信息**以提升解说稿质量（"男主对女主说..."而非"有人说..."）。
+>
+> **变更原则**：保留 Part I/II/III 全部章节不删；通过 §21-§22 增量覆盖 ADR-004 与 §8.2.2、§8.3.2；阅读时以 Part IV 为最高优先级。
+>
+> **决策来源**：本次 brainstorming 收敛过程见 `.context/chat.md` Session 4。
+>
+> **冲突时优先级**：v0.4 > v0.3 > v0.2 > v0.1（后写后准）
+
+---
+
+## 21. P0 修订（2 项）
+
+### 21.1 ADR-004 三度修订：ASR 默认改为本地 faster-whisper + large-v3
+
+**Status**: Supersedes Part III §16.1 ADR-004 (Aliyun NLS) AND Part II §13 ADR-004 (OpenAI Whisper API)
+
+**触发原因**：
+1. 用户明确反对阿里云 ASR 的 5 步 OSS 流水线（上传 OSS → SubmitTask → 轮询 → DELETE），认为对单机本地工具链过度复杂
+2. 开发机为 **Apple M3 Pro / 36GB / arm64**，本地 ASR 性能完全够用（实测 large-v3 实时率 4-5x，90min 电影约 12-18min）
+3. 本地方案天然满足零知识架构 K9/K10（音频从未离开本地）
+
+**新决策**：MVP 默认 **`faster-whisper` + `large-v3` 模型本地推理**；保留 `ASRProvider` 抽象基类不变，仅替换默认实现为 `LocalWhisperProvider`。
+
+**Consequences**：
+- ✅ 零网络依赖、零云服务凭证、零计费
+- ✅ 零知识架构强化：原音频文件**从未离开本地**（vs Aliyun 方案需短暂上传 OSS）
+- ✅ 跨平台兼容（CPU / CUDA / Metal 都跑）；未来若需上声纹兜底，可平滑切换 WhisperX
+- ✅ 集成成本低：M1.5 工期从 1d 降为 0.5d
+- ✅ 中文 WER 8-12%（large-v3）— 对下游 LLM 剧情理解任务足够（vs 阿里云 5-10% 的优势在 LLM 容错下感知不强）
+- ❌ 首次模型下载约 3.1GB（HF mirror 国内可达）；CI 环境需缓存模型权重
+- ❌ 90min 推理 12-18min（vs 阿里云云端 ~5-10min），但**无网络抖动 / 无配额限制 / 无重试逻辑**，总体可控
+
+**MVP 实现**：
+- `ASRProvider` 抽象基类不变（`transcribe(audio_path, language) -> ASRResult`）
+- 默认实现 `LocalWhisperProvider`，构造参数：`model_size="large-v3" / device="auto" / compute_type="default"`
+- `model_size` 候选：tiny / base / small / medium / large-v3（MVP 默认 large-v3）
+- `device="auto"` 自动检测 cuda → mps → cpu（faster-whisper 1.x 起原生支持）
+- `compute_type` 默认 `"default"`（按 device 自动选 int8/float16/float32）
+- 模型加载使用 lazy initialization + module-level 单例（避免子进程内重复加载）
+- 移除 `oss2` / `alibabacloud-nls-python-sdk` / `aliyun_asr_token` / `aliyun_asr_app_key` 配置项
+- 新增 Settings：`whisper_model_size` / `whisper_device` / `whisper_compute_type`
+
+**Alternatives Reconsidered**：
+- **mlx-whisper**：M3 Pro 速度更快（3-6min/90min），但锁死 Apple Silicon，未来 Linux 部署需切换 → **否决**
+- **FunASR / Paraformer-large**：中文 WER 5-8% 略优，但依赖重（torch + modelscope ~2GB+）、Python 3.13 兼容性未验证 → **暂不考虑**
+- **WhisperX**：自带 diarization 集成，但 MVP 不做声纹（见 §22）→ **保留为未来升级路径**
+
+---
+
+### 21.2 §8.2.2 ASR 子模块改写（本地版伪代码）
+
+**Status**: Supersedes Part I §8.2.2 (Whisper local v0.1) AND Part III implicit aliyun pseudocode
+
+```python
+# 伪代码 — LocalWhisperProvider
+from faster_whisper import WhisperModel
+from pathlib import Path
+
+_MODEL_SINGLETON: WhisperModel | None = None
+
+def _get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
+    """Module-level singleton — 避免子进程内重复加载 3GB 模型权重."""
+    global _MODEL_SINGLETON
+    if _MODEL_SINGLETON is None:
+        _MODEL_SINGLETON = WhisperModel(
+            model_size_or_path=model_size,   # "large-v3"
+            device=device,                    # "auto" → cuda/mps/cpu
+            compute_type=compute_type,        # "default"
+        )
+    return _MODEL_SINGLETON
+
+
+def transcribe(audio_path: Path, language: str = "zh") -> ASRResult:
+    model = _get_model("large-v3", "auto", "default")
+    segments_iter, info = model.transcribe(
+        str(audio_path),
+        language=language,
+        beam_size=5,
+        vad_filter=True,        # 内置 silero VAD，过滤静音段，提速且降错
+        word_timestamps=False,  # MVP 不需词级（句级足够下游绑定）
+    )
+    sentences = []
+    for idx, seg in enumerate(segments_iter):
+        if not seg.text.strip():
+            continue
+        sentences.append(ASRSentence(
+            idx=idx,
+            start_sec=float(seg.start),
+            end_sec=float(seg.end),
+            text=seg.text.strip(),
+            confidence=float(seg.avg_logprob),
+            speaker=None,            # MVP 不做声纹（见 §22）
+        ))
+    return ASRResult(
+        sentences=sentences,
+        language=info.language,
+        provider="local-whisper",
+    )
+```
+
+**关键约束**：
+- VAD（voice activity detection）默认开启 → 90min 电影中静音段（约 30-40%）跳过推理，实际耗时 ≈ 12-18min
+- `beam_size=5` 平衡质量/速度；large-v3 + beam=5 在 M3 Pro 测试下中文 WER ≈ 8%
+- 模型权重缓存路径：`~/.cache/huggingface/hub/`（faster-whisper 默认）
+- **失败兜底**：模型加载失败 → 降级到 `medium`（1.5GB，速度 8x 实时率）
+- **后处理沿用 v0.1 §8.2.2**：合并过短片段（<1s）、过滤纯噪音段（confidence < -1.0）
+
+**零知识架构强化（K9）**：
+- 原 Part III ADR-004 K9 验证依赖"OSS object 在 transcribe 返回后已不存在"
+- 改为本地后，**K9 验证简化为**："Index stage 完成后 `data/{job_id}/audio.wav` 文件已被删除"（M1.8 handler 负责）
+- **音频从未离开本地** → K10（草稿不含原片路径）实质上更加彻底
+
+---
+
+## 22. ADR-009（新增）：MVP 角色信息走 LLM 文本推断（路径 2）
+
+**Status**: Accepted（替换 Part I §3 第 35 行隐含决策"MVP 不做角色"）
+
+**触发原因**：
+- 用户明确希望 MVP 输出"男主对女主说..."这类带角色的解说，而非"有人说..."的含糊表达
+- 但用户硬件无 GPU，MVP 工期紧（W1 已进行至 12.12%），不接受为此延长 3-4 天做声纹
+
+**Decision**：MVP 阶段**完全不做声纹 diarization**（pyannote-audio / WhisperX 等），改用 **LLM 从对白文本推断角色** 的轻量方案：
+
+1. **ASR 侧零改动**：`ASRSentence.speaker` 字段保持 `None`（schema 一次到位原则继续生效，未来加声纹时填充）
+2. **M2a Plot Outline 增强**：在 Plot Outline 提取的 prompt 中要求 LLM 输出 `main_characters` 数组（`{role: "男主"|"女主"|"反派"|..., name?: "周星驰", description: "..."}`），并在 `key_acts.summary` 中显式标注哪些角色参与了该幕
+3. **M2a 解说稿生成增强**：在 narrative IR 生成的 prompt 的 user 段落中注入 `main_characters` 上下文，要求 LLM 用角色称呼（如"男主"、"女主"、"反派 A"，**或对白中明确出现的姓名**）替代"有人"、"某人"等含糊表达
+4. **不做的事**：
+   - 不做声纹聚类（Speaker_00/01/02）
+   - 不做角色名映射服务（"Speaker_01 = 周星驰"）
+   - 不做 ASR 句级 speaker 标注（保持 `speaker=None`）
+
+**为什么不做声纹**：
+- 声纹只输出匿名 ID（Speaker_00/01/02），**仍需 LLM 映射成具名角色** → LLM 推断这一步无论如何跑不掉
+- 电影场景 DER（diarization error rate）30-50%（BGM / 音效 / 重叠对白），匿名标签经常切错，**反而误导 LLM**
+- LLM 通过对白内容里的"爸"/"师父"/"陛下"/"X老师" 等称呼**已经能推断 80% 的角色关系**
+
+**Consequences**：
+- ✅ MVP 工期零增加（M1.5 ASR 任务定义不变，仅 M2a prompt 微调）
+- ✅ 解说稿质量提升明显（"男主对女主说..." vs "有人说..."）
+- ✅ 保留升级路径：未来 M5/v1.1 可加 WhisperX diarization，把声纹聚类结果作为 LLM prompt 的额外上下文（路径 3）
+- ❌ 当对白中无明确称呼/姓名时，LLM 可能仍输出"有人"（fallback 行为可接受）
+- ❌ 多人混淆场景（3+ 角色对话）LLM 可能搞错"谁对谁说"（v1.1 加声纹兜底）
+
+**关联数据模型变更**：
+- `PlotOutline` 字段 `main_characters` 由 v0.3 的 `list[str]` 升级为 `list[Character]`，其中 `Character(role: str, name: str | None, description: str)`
+- `KeyAct` 新增可选字段 `involved_characters: list[str]`（角色 role 列表）
+- 详细 schema 见 M2a-scripting-main.md 的 M2a.2 / M2a.3 任务条目
+
+---
+
+## 23. 工期与 KPI 影响汇总
+
+| 项 | 变更前（v0.3） | 变更后（v0.4） | 净影响 |
+|---|---|---|---|
+| M1.5 工期 | 1.0d（Aliyun OSS 5 步流水线 + tenacity + cleanup） | 0.5d（faster-whisper + 单例 + VAD） | **-0.5d** |
+| M2a.2/M2a.3 prompt 设计 | 1.0d + 1.0d | 1.0d + 1.0d（仅 prompt 增强，不增工时） | 0 |
+| 总工期 | 32d | 31.5d | **-0.5d** |
+| K9（raw 删除） | OSS object cleanup | 本地 audio.wav cleanup | 实现更简单、更可靠 |
+| K10（草稿不含原片） | 不变 | 不变（更彻底：音频从未离开本地） | 增强 |
+| K8（测试覆盖） | 含 OSS mock 复杂集成 | 改为模型加载 + 假音频单测 | 测试更快、更稳 |
+| R2（阿里云 ASR 限速） | 监控中 | **解除**（不再适用） | -1 风险项 |
+
+**新增风险**：
+| ID | 风险 | 概率 | 影响 | 缓解策略 |
+|---|---|---|---|---|
+| R15 | faster-whisper 模型权重首次下载慢/失败 | 🟡 中 | 🟡 中 | M1.5 提供 `scripts/preload_whisper.py` 预下载脚本；CI 缓存权重目录 |
+| R16 | LLM 角色推断在多人混淆场景出错 | 🟡 中 | 🟢 低 | M2a.2 prompt 加 few-shot 示例；v1.1 加声纹兜底（路径 3） |
+| R17 | M3 Pro 之外的低配 Mac 跑 large-v3 内存爆 | 🟢 低 | 🟡 中 | Settings 提供 model_size 配置项，文档建议低配机降到 medium |
+

@@ -34,7 +34,7 @@
 **关键设计决策**:
 - **包管理**: Poetry（src layout）
 - **配置**: `pydantic-settings.BaseSettings`，所有 secret 用 `SecretStr` 包装，环境变量优先于 `.env` 文件
-- **必备依赖**: fastapi / uvicorn / sqlalchemy 2.0 / pydantic 2.x / dashscope / alibabacloud-nls SDK / scenedetect / ffmpeg-python / pyjianyingdraft / loguru / tenacity / pytest 8.x
+- **必备依赖**: fastapi / uvicorn / sqlalchemy 2.0 / pydantic 2.x / dashscope / **faster-whisper**（v0.4 替换原 alibabacloud-nls SDK） / scenedetect / ffmpeg-python / pyjianyingdraft / loguru / tenacity / pytest 8.x
 - **目录结构**: 严格遵循总控文档第 5.1 节锁定的 src/autoclip/ 树
 - **Settings 字段**: data_dir 自动创建，max_concurrent_jobs 默认 1（MVP 单机串行）
 
@@ -167,42 +167,59 @@
 
 ---
 
-### M1.5 — ASRProvider 抽象 + AliyunASRProvider 实现
+### M1.5 — ASRProvider 抽象 + LocalWhisperProvider 实现（v0.4 修订）
 
-**目标**: 定义 ASR 接口契约，实现阿里云智能语音转写 Provider（design.md §16.1 ADR-004 再修订）。
+**目标**: 定义 ASR 接口契约，实现本地 faster-whisper Provider（design.md Part IV §21.1 ADR-004 三度修订）。
+
+> **v0.4 变更说明**: 原计划实现 `AliyunASRProvider`（5 步 OSS 流水线），用户在 brainstorming 阶段（chat.md Session 4）明确反对该方案，改为本地 `faster-whisper + large-v3`。理由：零网络依赖、零云服务凭证、零计费、零知识架构强化（音频从未离开本地）。开发机 M3 Pro 实测可行。
 
 **关键设计决策**:
-- **ASRProvider abstract base**: 单方法 `transcribe(audio_path: Path, language: str) -> ASRResult`
-- **数据结构**:
-  - `ASRSentence(idx, start_sec, end_sec, text, speaker?)`
+- **ASRProvider abstract base**: 单方法 `transcribe(audio_path: Path, language: str = "zh") -> ASRResult`（接口签名不变）
+- **数据结构**（与 ORM `models.shot.ASRSentence` 字段对齐）:
+  - `ASRSentence(idx, start_sec, end_sec, text, confidence, speaker=None)`
   - `ASRResult(sentences: list, language, provider)` + `to_dict()`
-- **AliyunASRProvider 链路**:
-  1. 上传音频到 OSS 临时 bucket（`autoclip-asr-tmp`）
-  2. 调用 alibabacloud_nls SDK `SubmitTask` → 拿 task_id
-  3. 轮询 `GetTaskResult`（10s 间隔，超时 600s）→ 拿 raw JSON
-  4. 解析 raw → 组装 ASRResult
-  5. **零知识架构**: finally 块强制删除 OSS object（K9 直接关联）
-- **重试**: tenacity 装饰器，3 次指数退避（min=2, max=30）
-- **额外依赖**: `oss2`, `alibabacloud-nls20180628`
+  - 注意: `speaker` 字段 MVP 永远为 `None`（design.md §22 ADR-009：路径 2 LLM 推断角色，不做声纹）
+- **LocalWhisperProvider 实现**:
+  - 构造参数: `model_size: str = "large-v3"`, `device: str = "auto"`, `compute_type: str = "default"`
+  - **模型单例**: `_MODEL_SINGLETON: WhisperModel | None = None`，避免子进程内重复加载 3GB 权重
+  - `transcribe()` 调用 `model.transcribe(audio, language="zh", beam_size=5, vad_filter=True, word_timestamps=False)`
+  - VAD 默认开启 → 静音段（电影约 30-40%）跳过推理，实际耗时 ≈ 12-18min/90min
+  - 后处理：合并 < 1s 段、过滤 `avg_logprob < -1.0` 段、跳过空文本段
+- **失败兜底**: 模型加载失败（OOM/网络）→ 降级到 `medium`（1.5GB）；仍失败抛 RuntimeError
+- **配置接入**: 从 `Settings.whisper_model_size / whisper_device / whisper_compute_type` 读取
+- **不再需要**: tenacity 重试（无网络）、OSS 上传/删除、阿里云 token
+
+**新依赖**:
+- Add: `faster-whisper = "^1.0"`（pyproject.toml）
+- **Remove**: `alibabacloud-nls-python-sdk`（v0.3 错误引入，本任务清理）
 
 **涉及文件**:
 - Create: `src/autoclip/providers/__init__.py`
-- Create: `src/autoclip/providers/asr/{__init__,base,aliyun}.py`
-- Create: `tests/unit/test_asr_base.py`
-- Create: `tests/integration/test_aliyun_asr.py`（默认 skip，需 `RUN_INTEGRATION=1`）
+- Create: `src/autoclip/providers/asr/__init__.py`
+- Create: `src/autoclip/providers/asr/base.py`（ASRProvider 抽象 + ASRSentence + ASRResult dataclass）
+- Create: `src/autoclip/providers/asr/local_whisper.py`（LocalWhisperProvider 实现）
+- Create: `tests/unit/test_asr_base.py`（dataclass + mock provider 测试）
+- Create: `tests/integration/test_local_whisper.py`（默认 skip，需 `RUN_INTEGRATION=1` + 5s 中文样本 fixture）
+- Modify: `pyproject.toml`（删 `alibabacloud-nls-python-sdk`，加 `faster-whisper`）
+- (Optional) Create: `scripts/preload_whisper.py`（首次运行前下载模型权重，规避 R15 风险）
 
 **测试策略**:
-- 单元: dataclass 字段 / duration_sec 计算 / mock provider 实现接口
-- 集成（手动）: 真实 5s 中文样本音频，验证返回 sentences 非空
+- 单元: ASRSentence/ASRResult dataclass 字段验证 / `to_dict()` 序列化 / mock provider 继承验证 / `speaker` 字段默认 None 断言
+- 集成（手动）: 5s 中文样本音频，验证 sentences 非空、时间戳单调递增、`provider == "local-whisper"`
 
 **验收标准**:
-- [ ] 接口设计通过 mock provider 验证可继承
-- [ ] 集成测试在本地一次手跑通过（开发者私下验证）
-- [ ] OSS object 在 transcribe 返回后已不存在
+- [ ] 单元测试 ≥ 4 个用例通过
+- [ ] 集成测试在本地一次手跑通过（开发者私下验证，5s 短音频 < 30s 完成）
+- [ ] `audio.wav` 处理过程中**从未上传到任何远程服务**（grep 代码确认无 oss/http upload 调用）
+- [ ] 模型单例验证：连续调用 transcribe 两次，模型仅加载一次（log 验证）
 
-**关联 KPI**: K9（OSS 临时文件清理）
-**依赖**: M1.1 → **阻塞**: M1.8
-**预估工时**: 1d
+**关联 KPI**: K9（音频零知识——本地化后由 M1.8 删除 audio.wav 实现，本任务保证 ASR 不复制/外传音频）
+**依赖**: M1.1（Settings 含 whisper_* 字段）→ **阻塞**: M1.8
+**预估工时**: **0.5d**（v0.3 原估 1d，本地化后省去 OSS 流水线 + tenacity + cleanup）
+
+**新增风险关联**:
+- R15: 首次模型权重下载慢/失败 → 提供 `scripts/preload_whisper.py`
+- R17: 低配 Mac 跑 large-v3 内存爆 → Settings 暴露 model_size 配置项
 
 ---
 
@@ -274,7 +291,7 @@
 
 ### M1.8 — Index Stage：ASR 调度 + 注册到 Runner
 
-**目标**: 把 M1.5（AliyunASR）+ M1.7（shot detector）组合为完整的 Index stage handler，并注册到 PipelineRunner。
+**目标**: 把 M1.5（LocalWhisperProvider）+ M1.7（shot detector）组合为完整的 Index stage handler，并注册到 PipelineRunner。
 
 **关键设计决策**:
 - **handler 流程**:
@@ -290,7 +307,7 @@
 **涉及文件**:
 - Create: `src/autoclip/pipeline/index.py`
 - Modify: `src/autoclip/pipeline/__init__.py`（追加 `from . import index`）
-- Create: `tests/integration/test_index.py`（需 fixtures + Aliyun keys）
+- Create: `tests/integration/test_index.py`（需 fixtures；本地 ASR 无凭证依赖，但需预下载 whisper 权重）
 
 **测试策略**:
 - 集成（端到端，需 keys）: 模拟 Ingest 已 DONE，注入 fixture normalized.mp4 + audio.wav，run_index 后验证 shots.json + asr.json 结构正确，audio.wav 已被删除
@@ -313,11 +330,11 @@
 | M1.2 ORM | 1.0d |
 | M1.3 状态机 | 0.5d |
 | M1.4 Runner + API | 1.5d |
-| M1.5 ASR Provider | 1.0d |
+| M1.5 ASR Provider（v0.4 本地化后） | **0.5d**（原 1.0d） |
 | M1.6 Ingest | 1.0d |
 | M1.7 Shot detector | 0.5d |
 | M1.8 Index 集成 | 1.0d |
-| **总计** | **7.0d**（5 工作日 + 2d buffer，控制在 W1 内）|
+| **总计** | **6.5d**（v0.4 节省 0.5d，控制在 W1 内更宽松）|
 
 ## M1 完成时的 git 行为
 按 250.md 规范，每个 task 至少 1 次 commit。Milestone 整体可考虑一次 squash merge 到 main 时使用如下 PR 描述模板：
@@ -328,7 +345,7 @@
     - T1.2 ORM models + DB init (incl. TimelineSegment unified model)
     - T1.3 File state machine (atomic write + cancel + resume)
     - T1.4 PipelineRunner (multiprocessing spawn) + jobs API
-    - T1.5 ASRProvider abstraction + Aliyun ISR impl
+    - T1.5 ASRProvider abstraction + LocalWhisper (faster-whisper + large-v3) impl
     - T1.6 Ingest stage (FFmpeg normalize + audio extract)
     - T1.7 Shot detector (PySceneDetect ContentDetector)
     - T1.8 Index stage (shots + ASR + audio cleanup)

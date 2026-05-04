@@ -63,23 +63,33 @@
 
 ---
 
-### M2a.2 — Plot Outline 提取（Prompt v1）
+### M2a.2 — Plot Outline 提取（Prompt v1，v0.4 含角色推断）
 
-**目标**: 设计并实现"剧情大纲提取" prompt，把整段 ASR + 视频时长 → 标题猜测/类型/主要人物/3-5 个关键幕。
+**目标**: 设计并实现"剧情大纲提取" prompt，把整段 ASR + 视频时长 → 标题猜测 / 类型 / **角色卡（路径2 LLM 推断）** / 3-5 个关键幕。
+
+> **v0.4 变更说明**：design.md §22 ADR-009 决定 MVP 角色信息走 LLM 文本推断（路径 2），不做声纹。本任务把 `main_characters` 从 v0.3 的 `list[str]` 升级为结构化角色卡 `list[Character]`，并在 `KeyAct` 增加 `involved_characters` 字段，为 M2a.3 narrative IR 生成提供"哪些角色出现在哪一幕"的上下文。
 
 **关键设计决策**:
-- **数据结构**:
-  - `KeyAct(act_idx, name, approx_start_sec, approx_end_sec, summary)`
-  - `PlotOutline(title_guess, genre, main_characters, plot_summary, key_acts)` + `to_dict()`
-- **Pydantic 校验层**: `_PlotOutlineRaw` / `_KeyAct` 用于严格校验 LLM 输出 schema，再转 dataclass 给业务层
+- **数据结构**（v0.4 升级）:
+  - `Character(role: str, name: str | None, description: str)` —— `role` 是稳定标签（"男主"/"女主"/"反派 A"/"导师"），`name` 仅在对白明确出现时填，`description` 一句话画像
+  - `KeyAct(act_idx, name, approx_start_sec, approx_end_sec, summary, involved_characters: list[str])` —— `involved_characters` 引用 Character.role 列表
+  - `PlotOutline(title_guess, genre, main_characters: list[Character], plot_summary, key_acts)` + `to_dict()`
+- **Pydantic 校验层**: `_CharacterRaw` / `_KeyActRaw` / `_PlotOutlineRaw` 用于严格校验 LLM 输出 schema，再转 dataclass 给业务层
 - **Prompt 结构**:
-  - System: "影视剧情分析专家"，强调 JSON-only 输出，禁止 markdown fence
-  - User: 注入 `asr_text`（截断 30k 字符）+ `duration_sec` + JSON Schema 模板
+  - System: "影视剧情分析专家 + 角色识别专家"，强调 JSON-only 输出，禁止 markdown fence
+  - User: 注入 `asr_text`（截断 30k 字符）+ `duration_sec` + JSON Schema 模板（含 Character schema）
+  - **角色推断指令**（关键）：
+    - "请基于对白中的称呼（如「爸」「师父」「陛下」「X老师」「队长」）和上下文逻辑，推断主要角色的功能性身份（男主/女主/反派/导师/...）"
+    - "如果对白中明确出现了某个角色的姓名（被他人喊出），请填入 name 字段；否则 name 留 null，仅填 role"
+    - "main_characters 数量限定 2-6 个，仅列对剧情推动有作用的角色"
+    - "key_acts[].involved_characters 必须是 main_characters[].role 中已定义的值"
 - **关键约束**:
   - key_acts 数量限定 3-5 个
   - approx_*_sec 必须基于对白时间戳推算，不能超出视频总时长
+  - main_characters 2-6 个，involved_characters 引用一致性校验
 - **解析层**: `parse_plot_outline_response(raw)` 必须支持 markdown fence 包裹（LLM 经常这样输出）
 - **fence 正则**: `^```(?:json)?\s*(.*?)\s*```$` (DOTALL)
+- **降级策略**：若 LLM 未输出 `main_characters` 或为空，degrade 为 `[]`（不抛错），下游 narrative IR prompt 会回退到不含角色的旧逻辑
 
 **涉及文件**:
 - Create: `src/autoclip/prompts/{__init__,plot_outline}.py`
@@ -87,16 +97,17 @@
 - Create: `tests/integration/test_plot_outline_e2e.py`
 
 **测试策略**:
-- 单元: build_messages 包含 ASR 文本和时长 / 解析 valid JSON / 解析带 markdown fence 的 JSON / 解析 schema mismatch 抛 ValueError
-- 集成（手动）: 真实 LLM 跑短片 ASR，肉眼检查输出合理性
+- 单元: build_messages 包含 ASR 文本和时长 / 解析 valid JSON / 解析带 markdown fence 的 JSON / 解析 schema mismatch 抛 ValueError / **Character 字段往返序列化** / **involved_characters 引用一致性校验**（不在 main_characters 中应抛 ValueError） / **main_characters 为空时 degrade 不抛错**
+- 集成（手动）: 真实 LLM 跑短片 ASR，肉眼检查输出合理性 + 角色卡是否符合直觉（如《喜剧之王》应识别出男主/女主/反派老板等）
 
 **验收标准**:
-- [ ] 4 个解析用例通过
+- [ ] 6+ 解析用例通过（含 v0.4 新增的 3 个角色相关用例）
 - [ ] 真实 LLM 调用 5 次成功率 ≥ 80%（剩余 20% 由 retry 兜底）
+- [ ] 真实样片输出的 main_characters 角色 role 字段命中率 ≥ 80%（人工评估）
 
-**关联 KPI**: K8
+**关联 KPI**: K8（解析层覆盖）+ ADR-009 路径 2 验证基线
 **依赖**: M2a.1 → **阻塞**: M2a.3 / M2a.6
-**预估工时**: 1d
+**预估工时**: 1d（v0.4 prompt 增强不增工时，仅微调 schema + few-shot）
 
 ---
 
@@ -116,11 +127,17 @@
   - 第三人称客观叙述，避免主观评论
   - 单句 8-15 字（便于 TTS 朗读）
   - 不用感叹号 / 反问句
+  - **使用角色称呼替代含糊指代**（v0.4 新增，配合 ADR-009 路径 2）：
+    - 优先使用 PlotOutline.main_characters 中的 role 标签（"男主"/"女主"/"反派"）
+    - 对白中明确出现 name 时使用 name（如"周星驰对柳飘飘说..."）
+    - **禁止**使用"有人"、"某人"、"一个人"等含糊词（除非角色信息缺失）
   - 文件位置: `prompts/style_presets/plot_summary.py`，导出 `STYLE_NAME / STYLE_DESCRIPTION / FEW_SHOT_EXAMPLE`
 - **Prompt 结构**:
-  - System: 注入 STYLE_DESCRIPTION + 总句数约束（target_duration_sec ÷ 6 ≈ N±5 句）
-  - User: 注入 plot_outline + asr_with_timestamps + few-shot example + 严格 JSON schema
+  - System: 注入 STYLE_DESCRIPTION + 总句数约束（target_duration_sec ÷ 6 ≈ N±5 句）+ 角色使用规约
+  - User: 注入 plot_outline（**含 main_characters 角色卡**） + asr_with_timestamps + few-shot example（**含角色称呼示范**） + 严格 JSON schema
+  - **few-shot example 强化**（v0.4）：至少包含 1 个示范角色称呼的句子，如"男主蹲在巷口的台阶上，望着远方失神。"
 - **截断保护**: asr_with_timestamps 上限 40k 字符
+- **角色信息缺失 fallback**：若 PlotOutline.main_characters 为空（M2a.2 degrade 路径），prompt 中省略角色规约段落，回退到 v0.3 行为
 
 **涉及文件**:
 - Create: `src/autoclip/algo/{__init__,narrative_ir}.py`
