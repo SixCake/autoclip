@@ -23,7 +23,7 @@ pydantic-settings = "^2.6.0"
 
 # === LLM / ASR / TTS Providers ===
 dashscope = "^1.20.0"  # Tongyi Qianwen LLM
-alibabacloud-nls-python-sdk = "^1.0.2"  # Aliyun ASR (revised default per ADR-001)
+faster-whisper = "^1.0.0"  # Local ASR (v0.4 ADR-004 三度修订, design.md Part IV §21.1)
 # Volcengine TTS uses raw HTTP API (no dedicated SDK needed)
 
 # === Media Processing ===

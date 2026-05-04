@@ -3,7 +3,7 @@
 All secrets are wrapped in `SecretStr` to prevent accidental logging.
 Settings are loaded with priority: env vars > .env file > defaults.
 
-Reference: design.md §6 (config layer), §16.5 (zero-knowledge: data_dir lifecycle).
+Reference: design.md Part IV §21 (local whisper ASR), §6 (config layer), §16.5 (zero-knowledge: data_dir lifecycle).
 """
 
 from pathlib import Path
@@ -28,14 +28,29 @@ class Settings(BaseSettings):
         description="Root directory for job artifacts. Auto-created on startup.",
     )
 
-    # === Aliyun ASR (revised default per ADR-001 v0.3) ===
-    aliyun_asr_app_key: SecretStr = Field(
-        default=SecretStr(""),
-        description="Aliyun NLS app key.",
+    # === Local ASR — faster-whisper (design.md Part IV §21.1, ADR-004 三度修订) ===
+    # No credentials required. Model weights cached at ~/.cache/huggingface/hub/.
+    whisper_model_size: str = Field(
+        default="large-v3",
+        description=(
+            "faster-whisper model size: tiny / base / small / medium / large-v3. "
+            "Default large-v3 (3.1GB, M3 Pro realtime ratio 4-5x). "
+            "Low-RAM machines can downgrade to medium (1.5GB)."
+        ),
     )
-    aliyun_asr_token: SecretStr = Field(
-        default=SecretStr(""),
-        description="Aliyun NLS access token.",
+    whisper_device: str = Field(
+        default="auto",
+        description=(
+            "Inference device: auto / cpu / cuda / mps. "
+            "'auto' lets faster-whisper pick best available."
+        ),
+    )
+    whisper_compute_type: str = Field(
+        default="default",
+        description=(
+            "Compute precision: default / int8 / float16 / float32. "
+            "'default' lets faster-whisper choose per device (int8 on CPU, float16 on GPU)."
+        ),
     )
 
     # === Tongyi Qianwen LLM ===
