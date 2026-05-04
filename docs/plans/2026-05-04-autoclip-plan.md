@@ -206,7 +206,7 @@ autoclip/
 |---|---|---|---|---|---|
 | R1 | pyJianYingDraft 库不维护 / 与最新剪映版本不兼容 | 🟡 中 | 🔴 高 | M3.6 JsonTimelineExporter 防御实现 | 监控中 |
 | R2 | ~~阿里云 ASR 长视频接口限速~~ | — | — | **v0.4 解除**（已切本地 faster-whisper） | ✅ 已解决 |
-| R15 | faster-whisper 模型权重首次下载慢/失败 | 🟡 中 | 🟡 中 | M1.5 提供 `scripts/preload_whisper.py`；CI 缓存 | 待 M1.5 验证 |
+| R15 | faster-whisper 模型权重首次下载慢/失败（**2026-05-04 19:03 实例触发：huggingface.co 在国内网络不通**） | 🟡 中 | 🟡 中 | **三档联合方案**：① `scripts/preload_whisper.py` 自动 export `HF_ENDPOINT=https://hf-mirror.com`；② 镜像 SDK 仍超时则用 `huggingface-cli download` 命令行；③ 终极兜底：`curl -L` 手动下载 5 个文件到 `~/whisper_models/faster-whisper-<size>/`，用 `LocalWhisperProvider(model_size=本地路径)` 吃本地权重（faster-whisper 原生支持，零网络） | ⚠️ 部分缓解（实例触发后已加固脚本，待用户实测确认本地路径方案可用） |
 | R16 | LLM 角色推断在多人混淆场景出错（ADR-009 路径 2） | 🟡 中 | 🟢 低 | M2a.2 prompt 加 few-shot；v1.1 加声纹兜底 | 待 M2a 验证 |
 | R17 | 低配 Mac 跑 large-v3 内存爆 | 🟢 低 | 🟡 中 | Settings 暴露 model_size 配置项，文档建议降到 medium | 待 M1.5 验证 |
 | R18 | 双轨 normalize 磁盘占用 2x（v0.5） | 🟡 中 | 🟢 低 | M3.8 cleanup 删除 low 保留 hd；Settings 可选 `INGEST_SINGLE_TRACK=1` 强制单轨降级（应急开关） | 待 M1.6 实现 |
