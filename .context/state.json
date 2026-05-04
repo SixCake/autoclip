@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.7.0-executing",
+  "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M1-infrastructure-in-progress (7/8 tasks)",
-  "current_focus": "M1.7 done (PySceneDetect shot detector; algo/ pure layer; +17 tests net; commit e25f07a); next M1.8 Index stage handler (integrate ASR + shot + delete audio.wav for K9)",
+  "phase": "M1-infrastructure-COMPLETE (8/8 tasks; ready for e2e acceptance)",
+  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +27 tests net + 2 integration; commit 7a74d10); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
   "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
@@ -15,11 +15,12 @@
       "path": "docs/plans/tasks/M1-infrastructure.md",
       "lines": 354,
       "tasks": 8,
-      "tasks_completed": 7,
+      "tasks_completed": 8,
       "estimate_days": 6.8,
-      "status": "in_progress",
-      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5", "M1.6", "M1.7"],
-      "next_tasks": ["M1.8"]
+      "status": "complete",
+      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5", "M1.6", "M1.7", "M1.8"],
+      "next_tasks": [],
+      "remaining_acceptance": ["M1 e2e: curl POST /api/jobs 5min clip → ingest+index DONE in <2min, shots.json + asr.json present, audio.wav absent"]
     },
     "M2a": {"path": "docs/plans/tasks/M2a-scripting-main.md", "lines": 304, "tasks": 6, "estimate_days": 5.5, "status": "pending"},
     "M2b": {"path": "docs/plans/tasks/M2b-scripting-robust.md", "lines": 282, "tasks": 5, "estimate_days": 6.0, "status": "pending"},
@@ -27,55 +28,53 @@
     "M4": {"path": "docs/plans/tasks/M4-e2e-validation.md", "lines": 320, "tasks": 5, "estimate_days": 5.5, "status": "pending"}
   },
   "total_tasks": 33,
-  "tasks_completed_overall": 7,
-  "completion_pct": 21.21,
-  "execution_strategy": "subagent-driven (in-session). M1.8 batch=1 (Index stage handler; integrate M1.5 ASR + M1.7 shot; delete audio.wav for K9; ~1d)",
+  "tasks_completed_overall": 8,
+  "completion_pct": 24.24,
+  "execution_strategy": "subagent-driven (in-session). M1 milestone done. Next: M1 e2e acceptance (manual curl test) then M2a kickoff (Scripting main flow, 6 tasks, W2)",
   "next_task": {
-    "id": "M1.8",
-    "title": "Index Stage handler — combine shot detector + ASR + register to PipelineRunner",
-    "subdoc": "docs/plans/tasks/M1-infrastructure.md (search '### M1.8')",
-    "files": [
-      "src/autoclip/pipeline/index.py",
-      "tests/integration/test_index.py"
+    "id": "M1-e2e",
+    "title": "M1 milestone end-to-end acceptance (manual)",
+    "subdoc": "docs/plans/tasks/M1-infrastructure.md §M1.8 验收标准",
+    "manual_steps": [
+      "1. uvicorn autoclip.api.main:app --reload (or similar entrypoint)",
+      "2. curl -X POST http://localhost:8000/api/jobs -F 'video=@5min-clip.mp4' -F 'target_duration_sec=60'",
+      "3. poll GET /api/jobs/<id> until both ingest + index stages report DONE",
+      "4. assert wall-clock < 2 minutes (M3 Pro / large-v3 baseline)",
+      "5. assert <data_dir>/<job_id>/shots.json exists with n_shots >= 1",
+      "6. assert <data_dir>/<job_id>/asr.json exists with sentences != []",
+      "7. assert <data_dir>/<job_id>/audio.wav does NOT exist (K9 verification)"
     ],
-    "modifies": [
-      "src/autoclip/pipeline/runner.py (uncomment 'autoclip.pipeline.index' in _STAGE_MODULES)"
-    ],
-    "estimate_days": 1.0,
-    "key_design_decisions": [
-      "handler 流程: 1) detect_shots(normalized_low.mp4) -> shots.json; 2) provider.transcribe(audio.wav) -> asr.json; 3) os.unlink(audio.wav) (K9 兑现); 4) mark Stage.INDEX DONE",
-      "进度上报: 0.0 (start) -> 0.3 (shots done) -> 0.95 (ASR done) -> 1.0 (cleanup + DONE)",
-      "Cancel 检查点: shot 切分后/ASR 调用前 (ASR 可能跑数分钟)",
-      "handler 签名: run_index(job_dir) -> None (与 M1.6 ingest 一致, 单参数)",
-      "注册: register_stage_handler(Stage.INDEX, run_index) 模块级 + _STAGE_MODULES 加 'autoclip.pipeline.index'",
-      "JSON 落盘: shots.json = {shots: [Shot.to_dict()], n_shots, total_duration_sec}; asr.json = ASRResult.to_dict()",
-      "K9 校验: audio.wav 在 INDEX DONE 后必须不存在 (集成测试断言)",
-      "失败容错: ASR 失败时 shots.json 已落盘则保留, 重跑 INDEX 仍可基于已有 shots.json 继续 (M1.5 Whisper 单例 spawn 子进程独立加载)"
-    ],
-    "depends_on_completed": [
-      "M1.5 (LocalWhisperProvider)",
-      "M1.6 (provides normalized_low.mp4 + audio.wav via Ingest stage)",
-      "M1.7 (provides detect_shots() + Shot dataclass)"
-    ],
-    "blocks": [
-      "M1 milestone 端到端验收 (curl POST /api/jobs 5min 短片 2min 内完成 ingest+index)",
-      "M2a 全部任务 (依赖 shots.json + asr.json)"
-    ],
-    "system_deps": ["ffmpeg/ffprobe (M1.6 已用)", "scenedetect (M1.7 已用)"]
+    "estimate_days": 0.2,
+    "blocks": ["M2a kickoff (Scripting main flow needs verified shots.json + asr.json contracts)"],
+    "system_deps": ["ffmpeg/ffprobe", "scenedetect", "faster-whisper weights (~1.5GB medium / 3GB large-v3)"]
+  },
+  "next_milestone": {
+    "id": "M2a",
+    "title": "Scripting main flow",
+    "subdoc": "docs/plans/tasks/M2a-scripting-main.md",
+    "tasks": 6,
+    "estimate_days": 5,
+    "depends_on": "M1 e2e acceptance must pass first to lock shots.json + asr.json schemas"
   },
   "previous_task": {
-    "id": "M1.7",
-    "title": "PySceneDetect shot detector (algo layer)",
-    "completed_at": "2026-05-04T21:50:00+08:00",
-    "commit": "d307ffe",
+    "id": "M1.8",
+    "title": "Index stage handler — shot detector + ASR + audio.wav cleanup (K9)",
+    "completed_at": "2026-05-04T22:05:00+08:00",
+    "commit": "7a74d10",
     "files_added": 3,
-    "lines_added": 473,
-    "tests_net_added": 17,
-    "actual_days": 0.4,
-    "post_review_fixes": [
-      "removed dead helper _build_video_duration_fallback_shot (13 lines, raised NotImplementedError, never called)",
-      "tightened test_shot_is_frozen to assert dataclasses.FrozenInstanceError (was pytest.raises((AttributeError, Exception)) - too lax)",
-      "clarified FALLBACK_FPS docstring (was 'Cap on probe-time fps fallback' - misleading; now 'Default fps used when scenedetect cannot read fps')"
+    "files_modified": 1,
+    "lines_added": 847,
+    "lines_deleted": 1,
+    "tests_net_added": 27,
+    "integration_tests_added": 2,
+    "actual_days": 0.6,
+    "key_implementation_notes": [
+      "naming: IndexStageError + IndexStageCancelledError (avoid Python builtin IndexError name collision in stack traces)",
+      "_build_asr_provider() seam: Settings-driven LocalWhisperProvider construction; module-level so unit tests monkeypatch it instead of patching faster_whisper",
+      "_load_existing_shots() crash-recovery: if shots.json present from prior failed run, skip 30s+ shot detection on retry (asr.json is NEVER reused — partial writes are corrupt-safe)",
+      "_atomic_write_json(): tmp+os.replace pattern matching state.py _save_atomic style for crash-safe artifact writes",
+      "K9 cleanup: Path.unlink(missing_ok=True) — idempotent; post-condition 'audio.wav does not exist' satisfied either way",
+      "PEP 563: handler signature test asserts annotation in (None, 'None') because from __future__ import annotations defers evaluation to strings"
     ]
   },
   "infra_baseline": {
@@ -134,14 +133,17 @@
     {"sha": "433c8b4", "msg": "🚧chore: R15 instance triage - HuggingFace network reset, 3-tier mitigation", "files": 3, "lines": 229},
     {"sha": "7d15cc5", "msg": "✨feat: M1.6 Ingest stage - dual-track normalize + audio extract (ADR-010)", "files": 7, "lines": 1289},
     {"sha": "bb51b87", "msg": "📝docs: worktree-save - sync .context for Session 7 (M1.6 done, R15 mitigated)", "files": 4, "lines": 129},
-    {"sha": "d307ffe", "msg": "✨feat: M1.7 PySceneDetect shot detector (algo layer, 17 unit tests)", "files": 3, "lines": 473, "note": "amended from e25f07a to remove 13-line dead helper _build_video_duration_fallback_shot + tighten test_shot_is_frozen to FrozenInstanceError + clarify FALLBACK_FPS comment"}
+    {"sha": "e25f07a", "msg": "✨feat: M1.7 PySceneDetect shot detector (algo layer, 17 unit tests)", "files": 3, "lines": 482, "note": "amended into d307ffe — see below"},
+    {"sha": "d307ffe", "msg": "✨feat: M1.7 PySceneDetect shot detector (amended for post-review dead-code removal)", "files": 3, "lines": 473},
+    {"sha": "dd5f89a", "msg": "📝docs: worktree-save - sync .context for Session 8 (M1.7 done + post-review dead-code fix)", "files": 4, "lines": 135},
+    {"sha": "7a74d10", "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)", "files": 4, "lines": 847}
   ],
   "test_status": {
-    "total_tests": 154,
-    "passed": 150,
-    "skipped": 4,
+    "total_tests": 183,
+    "passed": 177,
+    "skipped": 6,
     "failed": 0,
-    "execution_time_sec": 3.07,
+    "execution_time_sec": 4.33,
     "coverage_overall_pct": 96,
     "coverage_providers_asr_pct": 99,
     "new_in_m1_5": {
@@ -160,9 +162,13 @@
     "new_in_m1_7": {
       "test_shot_detector.py": 17,
       "_total_new": 17
+    },
+    "new_in_m1_8": {
+      "test_index_handler.py": 27,
+      "test_index.py (integration, default skip)": 2,
+      "_total_new": 29
     }
-  },
-  "kpi_tracking": {
+  },  "kpi_tracking": {
     "K1_binding_accuracy": {"target": ">=0.7", "verified_at": "M2b.5", "actual": null},
     "K2_evidence_recall": {"target": ">=0.8", "verified_at": "M2b.5", "actual": null},
     "K3_fallback_ratio": {"target": "<=0.3", "verified_at": "M2b.5", "actual": null},
@@ -176,5 +182,5 @@
     "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-04T21:46:00+08:00"
+  "updated_at": "2026-05-04T22:05:00+08:00"
 }

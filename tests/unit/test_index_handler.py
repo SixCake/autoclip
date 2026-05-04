@@ -275,9 +275,12 @@ def test_run_index_happy_path_full_flow(job_dir: Path):
     fake_provider = MagicMock()
     fake_provider.transcribe.return_value = _make_asr_result(2)
 
+    fake_factory = patch(
+        "autoclip.pipeline.index._build_asr_provider", return_value=fake_provider
+    )
     with (
         patch("autoclip.pipeline.index.detect_shots", return_value=_make_shots(3)) as ds_mock,
-        patch("autoclip.pipeline.index._build_asr_provider", return_value=fake_provider) as fac_mock,
+        fake_factory as fac_mock,
     ):
         run_index(job_dir)
 
@@ -360,7 +363,7 @@ def test_run_index_shot_detection_failure_propagates(job_dir: Path):
 
 
 def test_run_index_asr_failure_keeps_shots_drops_asr(job_dir: Path):
-    """ASR failure preserves shots.json (resume path) but never writes asr.json + keeps audio.wav."""
+    """ASR failure: keep shots.json (resume), do NOT write asr.json, keep audio.wav."""
     fake_provider = MagicMock()
     fake_provider.transcribe.side_effect = RuntimeError("whisper crash")
 

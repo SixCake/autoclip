@@ -666,3 +666,42 @@ User in pre-M1.5 phase:
   - 集成 M1.5 LocalWhisperProvider + M1.7 detect_shots(); 删 audio.wav 兑现 K9
 - M1 milestone 端到端验收 (M1.8 完成后, 8/8 收官)
 - 测试约定: M1.5 集成测试已建立 RUN_INTEGRATION=1 先例; M1.6 集成测试已落地 (3 skip); M1.8 集成测试将复用同一约定, 端到端验证 ingest -> index 全链路
+
+---
+
+## Session 9 — 2026-05-04 22:05
+
+### Trigger
+- 用户输入"继续" → 推进 M1.8 Index stage handler (M1 milestone 最后一个任务, 完成后 8/8 收官)
+
+### Decisions
+- **M1.8 Index stage handler 实施** (commit 7a74d10):
+  - **命名避坑**: `IndexStageError` + `IndexStageCancelledError` 避开 Python 内置 `IndexError` (后者是 list[i] 越界), 防止 stack trace 里语义混淆
+  - **`_build_asr_provider()` seam**: Settings 驱动构造 LocalWhisperProvider; 模块级 helper 让单测 monkeypatch 这一处即可替换 fake provider, 无需深入 patch faster_whisper
+  - **崩溃恢复 resume**: `_load_existing_shots(shots_path)` — 若 shots.json 已存在 (上一轮 ASR 失败但 shot detection 成功), 跳过 30s+ 重切分; **asr.json 永不复用** (partial write corrupt-safe 困难, 重做更稳)
+  - **K9 unlink 兑现**: `Path.unlink(missing_ok=True)` 幂等; 后置条件"audio.wav 不存在"无论之前是否手动清过都满足
+  - **handler 注册路径**: 只改 runner.py `_STAGE_MODULES` (取消注释 'autoclip.pipeline.index'), **不**改 pipeline/__init__.py — 后者会让 parent 进程也 import scenedetect 拖慢启动 (M1.8 plan 文档建议过时, 以 M1.6 ingest 同款机制为准)
+  - **PEP 563 测试坑**: handler signature 测试断言 `return_annotation in (None, "None")` — 因为 `from __future__ import annotations` 让 inspect.signature 返回字符串而非 NoneType 对象 (此 bug 在第一次跑 pytest 时被发现, 立即修复)
+
+### Files Added/Modified
+- `src/autoclip/pipeline/index.py` — NEW run_index handler + 4 helpers (commit 7a74d10)
+- `src/autoclip/pipeline/runner.py` — MODIFIED 1 行: _STAGE_MODULES 取消注释 (commit 7a74d10)
+- `tests/unit/test_index_handler.py` — NEW 27 单测 (commit 7a74d10)
+- `tests/integration/test_index.py` — NEW 2 集成测 default skip (commit 7a74d10)
+
+### Verification
+- pytest 全量回归: 150 → 177 passed (净增 +27 单测), 4 → 6 skipped (+2 集成 default skip)
+- ruff: All checks passed (顺手修了 5 处 SIM117 + 1 处 I001, 与 M1.7 自检日志同款 pattern)
+- read_lints: No lint errors found
+- import smoke: `from autoclip.pipeline import index, runner; runner.get_stage_handler(Stage.INDEX)` 返回 `<run_index from autoclip.pipeline.index>` ✅
+- 设计契约 8 项全部兑现: handler 流程 / 进度 0.3-0.95-1.0 / 2 cancel checkpoint / (Path)->None 签名 / _STAGE_MODULES 注册 / shots.json + asr.json schema / K9 unlink / shots.json resume
+
+### Milestone Achievement: M1 8/8 ✅
+- M1 状态: 进行中 7/8 → **已完成 8/8**
+- M1 总工时: 实际 ~5.4d (M1.1 0.5 + M1.2 1.0 + M1.3 0.5 + M1.4 1.5 + M1.5 0.5 + M1.6 1.3 + M1.7 0.4 + M1.8 0.6) vs 估算 6.8d, **提前 ~20%**
+- 测试积累: M1 端 0 → 177 passed + 6 skipped (5 个 module 全覆盖)
+- 唯一未完成: M1 e2e 验收 (人工 curl 测试, 0.2d) — 不阻塞 M2a 设计层启动, 但执行 M2a 实现前必须先跑通
+
+### Next
+- **M1 e2e 验收** (0.2d, 人工): curl POST /api/jobs + 5min 短片 → 验证 2min 内 ingest+index 全 DONE / shots.json + asr.json 合规 / audio.wav 已删
+- **M2a Scripting 主链路** (W2, 6 个任务, ~5d) — 待 e2e 验收通过后启动 (锁定 shots.json + asr.json schema 后开工)

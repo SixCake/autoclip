@@ -493,3 +493,41 @@
   - 流程: detect_shots(normalized_low.mp4) -> shots.json; LocalWhisperProvider().transcribe(audio.wav) -> asr.json; os.unlink(audio.wav) [K9]; mark INDEX DONE
   - 进度: 0.0 -> 0.3 (shots) -> 0.95 (asr) -> 1.0 (cleanup); cancel 检查点在 ASR 调用前
 - M1 milestone 端到端验收 (M1.8 完成后, 8/8 收官): curl POST /api/jobs 5min 短片 2min 内 ingest+index 全 done, shots.json + asr.json 产出, audio.wav 已删
+
+---
+
+## Session 9 (2026-05-04 22:05) — M1.8 Index stage 单 batch 闭环 (0.6d 实际, 比估 1d 提前 40%) → M1 milestone 8/8 ✅
+
+### 关键流程决策
+- **executing-plans skill 单 batch + 8 项 todo 细分**: M1.8 涉及 5 个文件 + 5 个模块依赖, 用单 batch 但 todo 列表细分 (read 依赖 / 实现 / runner 启用 / unit / integration / 全绿验证 / commit / post-review 自检) — 既不丢步骤也不被中间 stop&report 拖累
+- **命名避坑 IndexStageError**: 第一反应想叫 `IndexError + IndexCancelledError`, 当场意识到与 Python 内置 IndexError 重名会污染 stack trace; 改为 `IndexStage*` 前缀彻底避开 — 这是上下文记忆里被刻意标注的 trap, 没踩
+- **`_build_asr_provider()` seam 设计**: 直接 `LocalWhisperProvider()` 硬编码 → 单测必须 patch faster_whisper, 复杂; 抽出 module-level seam → 单测只 patch 一行 + 真实代码也更清晰从 Settings 注入. 这种"为可测性引入一层间接"是 Martin 的 Clean Code 范式
+- **resume 仅复用 shots.json, 不复用 asr.json**: shots.json 是 atomic write 一次性产物, 复用安全; asr.json 在 Whisper 跑分钟级时如果中途 crash, partial JSON 难以可靠校验, 直接重做 — 这是失败容错的"保守优先"原则
+- **handler 注册不改 pipeline/__init__.py**: M1.8 plan 文档建议"追加 from . import index", 但实际上 pipeline.runner._STAGE_MODULES 才是真正的注册机制 (M1.6 ingest 已经按这个模式跑通). 改 __init__.py 会让 parent 进程提前 import scenedetect/cv2/av (200ms+ 启动开销), 反而拖慢非 Index 的 spawn 子进程. **以代码为准, plan 文档过时**
+
+### 流程亮点
+- ✅ **依赖 read 一次到位**: 第一轮并行 read 了 plan §M1.8 / ingest.py / runner.py / state.py 4 个文件, 第二轮补 read local_whisper.py + asr/__init__.py + plan.md §2 + grep get_settings + Settings 字段, 7 个并行 read + 3 个 grep, 一轮回合就拿到全部契约
+- ✅ **PEP 563 测试坑当场修复**: handler signature 单测第一次跑挂 (`assert 'None' is None`), 30 秒内定位到 `from __future__ import annotations` 导致 annotation 字符串化, 改成 `in (None, "None")` 兼容写法 — 这种 Python 隐性陷阱以后写 inspect-based 测试要预防
+- ✅ **lint-as-code-review 三件套一次过 (修 SIM117 后)**: 5 处嵌套 with → 单 with 多 context manager + pytest.raises 写在 with 内, 与 M1.7 末轮完全同款修复, 累计第 4 次 SIM117 — **下次写 mock with 直接用 multi-context 语法, 不再嵌套**
+- ✅ **27 单测覆盖完整**: constants pin 1 + handler 签名 1 + _shots_to_payload 3 + _atomic_write_json 2 + _load_existing_shots 6 (含 corrupt/empty/missing-field/wrong-schema 4 种异常路径) + _check_cancel 3 (含 subclass 验证) + _build_asr_provider 1 + run_index 9 (pre-flight 2 + happy + progress milestones spy + 3 failure modes + resume + 2 cancel checkpoints) + handler 注册 1
+
+### Pitfall 记录
+- ⚠️ PEP 563 deferred annotation: `inspect.signature(f).return_annotation` 在 `from __future__ import annotations` 文件里返回字符串 `'None'` 而非 NoneType — 测试断言要写成 `in (None, "None")` 兼容写法
+- ❌ ruff SIM117 累计第 4 次: 嵌套 with + pytest.raises 写法是顽固肌肉记忆 → 已固化新写法 `with (a, b, c, pytest.raises(...)): block`, **下次写 mock 测试零容忍**
+
+### Verification (Session 9 累计)
+- 2 个 commit: 7a74d10 (M1.8 实现) + 待 commit (worktree-save 收尾)
+- 测试总数: 154 (150p+4s) → 183 (177p+6s) (净增 +29: 27 单测 + 2 集成)
+- M1 进度: **7/8 → 8/8 ✅ milestone 完成** (M1 端到端 e2e 验收待手动跑)
+- 整体进度: 21.21% → **24.24%** (8/33 任务)
+
+### M1 总结 (整个 milestone 跨 9 个 session)
+- 总工时实际 ~5.4d vs 估算 6.8d, **提前 20%**
+- 测试积累: 0 → 183 (177 passed + 6 skipped 集成默认 skip)
+- 5 个核心模块全部交付: state machine (M1.3) / runner (M1.4) / ASR provider (M1.5) / Ingest stage (M1.6) / Shot detector (M1.7) / Index stage (M1.8)
+- KPI 兑现: K7 (5-stage pipeline 跑通) ✅ / K8 (shot 检测 + Whisper ASR 集成) ✅ / K9 (audio.wav 在 Index DONE 后必删, atomic 化设计) ✅
+- 关键架构决策落地: spawn 子进程隔离 / 文件状态机 / atomic JSON 写 / lazy import / 双轨 normalize / FrozenInstanceError 严格断言 / 命名避坑 (IndexStageError) / resume 失败容错
+
+### 下一步 (Session 10)
+- **M1 e2e 验收** (人工, 0.2d): uvicorn 启动 → curl POST /api/jobs 5min 短片 → 验证 2min 内全 DONE / shots.json + asr.json 合规 / audio.wav 已删
+- **M2a Scripting 主链路启动** (W2 周, 6 任务, ~5d): 候选脚本生成 + 评分 + 选优, 依赖 M1 e2e 验收锁定 shots.json + asr.json schema
