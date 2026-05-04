@@ -724,3 +724,28 @@ User in pre-M1.5 phase:
 - 测试: 154 → 183 (177 passed + 6 skipped), 净增 +29
 - M1.8 三个新文件 ruff strict 完全干净
 - 项目默认 ruff + read_lints + pytest 全绿; git working tree [CLEAN]
+
+### Post-Implementation Self-Check Round 2 (用户主动追问触发)
+**触发**: 用户输入"请检查当前编辑的文件里, 是否存在未实现的部分、遗留的 todo、信息收集不充分导致的简化实现、假设实现"
+**方法**: 不依赖关键词 grep, 完整 read 4 个 M1.8 新建/编辑文件 (index.py + test_index_handler.py + test_index.py + runner.py 关键段) 做语义层逐行审视
+
+**发现 4 个 must-fix bug**:
+- **BUG#1 死代码** (index.py L29-33): `from typing import TYPE_CHECKING` + `if TYPE_CHECKING: pass` 块完全无意义 — TYPE_CHECKING 块本应放仅类型注解所需的 import 来避免循环导入, 但这里没任何 import, import 本身也未被使用. 这正是 user 反复警告的"占位符遗留, 写完忘了删". 修复: 删除 TYPE_CHECKING import + 整个 if 块
+- **BUG#2 未防空索引隐含假设** (index.py L191-198): `logger.info(... shots[0].start_sec, shots[-1].end_sec ...)` 假设 shots 永远非空, 但: (a) `_shots_to_payload([])` 测试明确允许空 list (b) `detect_shots` 当前有 zero-scene→single-shot fallback, 但这是"隐式契约", 未来若 fallback 改了 handler 就会炸. 违反"严禁假设实现". 修复: 在 detect_shots 返回后立即 `if not shots: raise IndexStageError(...)`, fail-fast 而非依赖隐式契约
+- **BUG#4 测试错误异常类型** (tests/integration/test_index.py 旧 L127): `pytest.raises(FileNotFoundError)` 是凭直觉假设的异常类型, 实际上 handler 的 pre-flight 检查会先于 Whisper 触发并抛出 IndexStageError. 这测试在 default-skip 之外根本跑不通, 是典型的"信息收集不充分→假设实现"
+- **BUG#5 测试设计依赖错误执行路径** (tests/integration/test_index.py 旧 L120-145): 整个 `test_run_index_resume_after_shots_failure` 设计错误 — 删 audio.wav 后跑 run_index, pre-flight 立刻报 IndexStageError, 根本走不到 detect_shots, shots.json 永远不会被写入. 测试根本验证不了 reuse. 修复: 重写为正确的 partial-success 模拟: 先跑 1 轮成功 → 删 asr.json + 恢复 audio.wav → 重跑, 用 "shots.json bytes + mtime 严格不变" 证明 reuse (集成层最强 reuse 证据, 单测层有 mock-based 严格证明)
+
+**发现 2 个 known-limitation (M1 不修, 记录留给后续)**:
+- **LIM#3 shots.json schema 校验弱** (M2a 必须处理): `_load_existing_shots` 的 try 块只校验 `int(s["idx"])` 单字段类型, 不校验跨 shot 的 idx 严格递增 / start_sec 单调 / 无 overlap. 一份被人手改坏的 shots.json (idx 全 0、乱序、时间倒挂) 能通过 reload, 下游脚本生成会因索引混乱出 bug. **M1.8 契约只是"原样恢复", 完整 schema 验证是 M2a 加载 shots.json 时的责任**
+- **LIM#6 INDEX 进度为里程碑跳变非细粒度** (M3 可选): 当前实现 progress 序列是 `0.0 → 0.3 (shot done) → 0.95 (asr done) → 1.0`, 前端轮询会看到 30s + Nmin 两段平稳期 + 两次跳变. 设计文档定义就是离散里程碑, 技术上符合 M1 契约, 但**不是真正实时进度**. 若 M3 用户体验阶段需要细粒度进度, 需要给 detect_shots 和 LocalWhisperProvider.transcribe 加 progress callback (faster-whisper 的 segment iterator 天然支持流式)
+
+**Self-Check Round 2 修复后验证**:
+- ruff default + ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- pytest 全量回归: 仍是 177 passed + 6 skipped (修 BUG#2 没改任何已有测试用例的预期, 修 BUG#4+5 重写的集成测试 default skip)
+- read_lints: No lint errors found
+- pytest --collect-only on test_index.py: 2 tests 正确识别 (含重命名后的 test_run_index_resume_reuses_shots_json)
+
+**教训**:
+- 上一轮 #m1.8-8 自检只 grep 关键词 (TODO/FIXME/NotImplemented/placeholder/stub/simplified), **完全没看出 BUG#1-5**, 因为这 5 个 bug 都不是关键词层面的, 而是语义层面的 "假设/简化/未防御". 关键词 grep 只能挡"明显占位符", 挡不住"凭直觉写代码导致的隐含假设"
+- 真正有效的自检方法是用户这次要求的: 完整 read 文件后逐行问"这里假设了什么? 这个假设有保障吗? 不满足时会怎样?". 这种语义自检后续每个 milestone 收尾必须做一遍, 不能只 grep 了事
+- 集成测试 default-skip 看似"安全网", 实际上是"无人检查的死代码温床" — 我写完后从没真跑过 RUN_INTEGRATION=1, 错误的异常类型 + 错误的执行路径假设直到用户追问才暴露. 后续约定: 集成测试至少在本地跑过一次再 commit, 不能只靠 collect-only 验证

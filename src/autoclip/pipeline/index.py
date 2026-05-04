@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
@@ -44,9 +44,6 @@ from autoclip.pipeline.runner import register_stage_handler
 from autoclip.pipeline.state import JobStateFile, Stage, StageStatus
 from autoclip.providers.asr.base import ASRProvider, ASRResult
 from autoclip.providers.asr.local_whisper import LocalWhisperProvider
-
-if TYPE_CHECKING:
-    pass
 
 # Output filenames (constants so tests + downstream stages stay in sync).
 SHOTS_FILENAME = "shots.json"
@@ -187,6 +184,14 @@ def run_index(job_dir: Path) -> None:
     if shots is None:
         logger.info("[index] running detect_shots on {}", low_path.name)
         shots = detect_shots(low_path)
+        # Defensive: detect_shots currently has a zero-scene → single-shot fallback,
+        # but we don't want to silently depend on that contract. Empty shots is a
+        # hard error here because downstream (M2a scripting) cannot operate on it.
+        if not shots:
+            raise IndexStageError(
+                f"detect_shots returned empty list for {low_path.name}; "
+                "video may be unreadable or all-black"
+            )
         _atomic_write_json(shots_path, _shots_to_payload(shots))
         logger.info(
             "[index] shots.json written: n_shots={} first=[{:.2f},{:.2f}]s "

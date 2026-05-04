@@ -107,34 +107,57 @@ def test_run_index_end_to_end_real_whisper(job_dir: Path):
     assert slot["progress"] == 1.0
 
 
-def test_run_index_resume_after_shots_failure(job_dir: Path):
-    """Crash-and-recover: pre-fail by deleting audio.wav, then resume.
+def test_run_index_resume_reuses_shots_json(job_dir: Path):
+    """Crash-and-recover: shots.json from a prior run must be reused on retry.
 
-    Verifies the resume optimization works in the real-binary path:
-    1st run fails (no audio) but writes shots.json.
-    2nd run with audio restored should reuse shots.json.
+    Original (broken) design tried to sabotage by deleting audio.wav before
+    the first run — but the handler's pre-flight check raises IndexStageError
+    BEFORE detect_shots even runs, so shots.json never gets written. That
+    test could never actually exercise the resume path.
+
+    Correct design: simulate a partial-success state directly.
+    1. Run once successfully  → shots.json + asr.json present, audio.wav gone.
+    2. Simulate a 2nd-stage retry by removing asr.json and restoring audio.wav
+       (i.e. pretend the prior run completed shot detection and ASR but a
+       downstream consumer wiped asr.json — operationally equivalent to the
+       crash-after-shots-before-asr-finalized case).
+    3. Re-run; the handler should skip detect_shots entirely.
+
+    Strict reuse proof for the integration layer (where we can't mock the
+    seam): shots.json bytes + mtime must be identical across the two runs.
+    The unit test `test_run_index_resume_uses_existing_shots` provides the
+    full mock-based proof that detect_shots is never called.
     """
     src = _resolve_fixture_dir()
-    audio_backup = job_dir / "audio.wav.bak"
-    shutil.copy2(src / AUDIO_FILENAME, audio_backup)
 
-    # Sabotage: remove audio.wav so ASR will fail with FileNotFoundError
-    (job_dir / AUDIO_FILENAME).unlink()
-    with pytest.raises(FileNotFoundError):
-        run_index(job_dir)
+    # --- 1st run: full success ---
+    run_index(job_dir)
+    shots_path = job_dir / SHOTS_FILENAME
+    asr_path = job_dir / ASR_FILENAME
+    assert shots_path.exists()
+    assert asr_path.exists()
+    assert not (job_dir / AUDIO_FILENAME).exists()
 
-    # shots.json should have been written before ASR failed
-    assert (job_dir / SHOTS_FILENAME).exists()
-    shots_before = json.loads((job_dir / SHOTS_FILENAME).read_text(encoding="utf-8"))
+    shots_bytes_before = shots_path.read_bytes()
+    shots_mtime_before = shots_path.stat().st_mtime_ns
 
-    # Restore audio and re-run — should succeed and reuse shots.json
-    shutil.move(audio_backup, job_dir / AUDIO_FILENAME)
+    # --- Set up partial-success state for 2nd run ---
+    asr_path.unlink()  # simulate asr.json wiped
+    shutil.copy2(src / AUDIO_FILENAME, job_dir / AUDIO_FILENAME)
+
+    # --- 2nd run: must reuse shots.json (no re-detection) ---
     run_index(job_dir)
 
-    # Same shot list (proves reuse, not re-detection — though re-detection
-    # would also produce identical output, so this is a weak proof; the
-    # unit test test_run_index_resume_uses_existing_shots is the strict one)
-    shots_after = json.loads((job_dir / SHOTS_FILENAME).read_text(encoding="utf-8"))
-    assert shots_before["n_shots"] == shots_after["n_shots"]
-    assert (job_dir / ASR_FILENAME).exists()
+    # Strict reuse proof: shots.json untouched (same bytes + same mtime)
+    shots_bytes_after = shots_path.read_bytes()
+    shots_mtime_after = shots_path.stat().st_mtime_ns
+    assert shots_bytes_after == shots_bytes_before, (
+        "shots.json was rewritten — resume optimization broken"
+    )
+    assert shots_mtime_after == shots_mtime_before, (
+        "shots.json mtime changed — file was touched even if contents matched"
+    )
+
+    # asr.json regenerated, K9 honored
+    assert asr_path.exists()
     assert not (job_dir / AUDIO_FILENAME).exists()
