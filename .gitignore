@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Node / Frontend
+node_modules/
+.next/
+.turbo/
+.cache/
+dist/
+build/
+*.log
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Project artifacts (大文件不入库)
+data/
+uploads/
+output/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.heapsnapshot
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local context (按 992 规则，hidden file 不主动 commit；但 .context/ 是项目文档目录，需要 track)
+# 显式不忽略 .context/
+!.context/
+!.context/**
+
