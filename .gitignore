@@ -49,4 +49,8 @@ output/
 # 显式不忽略 .context/
 !.context/
 !.context/**
-
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
