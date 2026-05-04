@@ -388,3 +388,43 @@
 - M1.6 Ingest stage: FFmpeg 视频归一化 + 音频抽离; 1.0d
 - 文件: utils/ffmpeg.py + pipeline/ingest.py + 2 测试
 - 系统依赖: ffmpeg + ffprobe (需先 brew install ffmpeg 确认)
+
+---
+
+## Session 6 — M1.6 v0.5 adhoc 双轨 normalize 文档同步（2026-05-04 18:41-19:00）
+
+> 阶段：adhoc-changes (按 892.md 第二阶段，计划外改动必须先 design.md + plan.md 同步再执行)
+> 模型：claude4.7-opus
+
+### 触发与流程纠错
+- 用户先要求"测试脚本，并行往下走"
+- 我误启动 brainstorming（错误：M1.6 在 plan 子文档已有完整定义，应走 executing-plans 而非 brainstorming）
+- 用户纠正："不是新功能啊，文档在 docs/plans 下不是已经约定好执行计划了吗"
+- 切换到 executing-plans skill: 读计划 → critical review → 提 3 个澄清问题
+- 用户回答 3 问题: 1=job_dir 是用户上传磁盘目录 / 2=双轨 (low+hd) / 3=测试视频 ~/Downloads/英语启蒙误区与脑科学.mp4
+
+### Critical review 决策链
+- 双轨 normalize 是 plan 外的设计变更（plan 原写"720p 25fps 单轨"），按 892.md 必须先文档先行再代码
+- 用户确认"完整同步：M1-infra + plan + design + state.json → 然后再写代码"
+
+### Adhoc 同步执行
+1. 读取 4 个文档当前内容（M1.6 L226-263 + plan.md 全文 + design.md §6.1 + Part IV §23 末尾 + state.json next_task）
+2. 4 处 file_replace + 1 次 design.md heredoc 追加 §24 ADR-010
+3. 1 次 commit (56cf8e4)
+4. 测试命令补发用户
+
+### 关键认知锁定
+- **executing-plans vs brainstorming 边界**: plan 子文档已有"关键设计决策"+"涉及文件"+"测试策略" → executing-plans；只有 plan 完全空白或新增任务才 brainstorming
+- **adhoc 流程**: 设计变更（哪怕用户拍板）也必须先同步 design.md → plan.md → state.json → commit → 再写代码（避免文档与代码漂移）
+- **ADR-010 完整决策范本**: 决策/约束/进度方案/磁盘成本/为什么不选 A/B/C/回滚策略 — 5 个维度齐全才算合格 ADR
+
+### Pitfall 记录
+- ❌ 误启动 brainstorming → 用户纠正
+- ❌ 测试视频路径写错 (~/Downloads/test.mpt 不存在) → ls 实测后用户改用真实路径
+- ✅ 实测 fixture 是 1376×768 而非 1080p → ADR-010 已写入"原片向下兼容"规则避免无效 upscale
+
+### 下一步 (Session 7)
+- M1.6 实现 batch 1: utils/ffmpeg.py 4 个函数 + test_ffmpeg_utils.py 单元测试
+- M1.6 实现 batch 2: pipeline/ingest.py handler + 单元测试 (mock subprocess)
+- M1.6 实现 batch 3: integration test + 接到 PipelineRunner + commit
+- 用户并行：跑 test_whisper_realvideo.sh 验证 M1.5 实测

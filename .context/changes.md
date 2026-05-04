@@ -544,3 +544,42 @@ User in pre-M1.5 phase:
 ### Next
 - M1.6 Ingest stage (FFmpeg normalize + audio extract); 1.0d
 - 系统依赖: ffmpeg + ffprobe (brew install ffmpeg)
+
+---
+
+## 2026-05-04 (Session 6: M1.6 v0.5 adhoc - 双轨 normalize 文档同步)
+
+### Goal
+根据用户 18:51 决策（方案 2 双轨 normalize），在动手代码前完整同步 4 个文档，确保 design/plan/state 三方一致。
+
+### Trigger
+用户原话："normalize 双轨：normalized_low.mp4（720p 给 Shot 检测） + normalized_hd.mp4（1080p 给 Render）——（最灵活但磁盘 2 倍 + 工时 +0.3d）"
+
+### Decisions
+- M1.6 单轨 → 双轨 normalize；工时 1.0d → 1.3d；M1 总工期 6.5d → 6.8d；全工期 31.5d → 31.8d
+- normalized_low.mp4: 720p 25fps, libx264 crf=23 preset=medium + aac 128k → 给 PySceneDetect / Whisper
+- normalized_hd.mp4: 1080p 原帧率, libx264 crf=21 preset=medium + aac 192k → 给 Render (M3.4/M3.5) 出片
+- 进度上报: 0.05 (probe) → 0.45 (low) → 0.85 (hd) → 0.95 (audio) → 1.0
+- 应急开关: INGEST_SINGLE_TRACK=1 (R18 缓解，磁盘吃紧时降级单轨 hd)
+- 原片向下兼容: 实测视频 1376×768，hd 按 min(原高,1080)=768 不 upscale；low 仍 720p
+
+### Modified files (4, commit 56cf8e4)
+- `docs/plans/tasks/M1-infrastructure.md`: §M1.6 整体重写（4 个 build_* 函数、产物三件套、磁盘成本、向下兼容）；工时表 M1.6 1.0d→1.3d，M1 总计 6.5d→6.8d
+- `docs/plans/2026-05-04-autoclip-plan.md`: changelog +v0.3；R18 新增（双轨磁盘 2x + INGEST_SINGLE_TRACK 应急开关）
+- `docs/plans/2026-05-04-autoclip-design.md`: §6.1 Video 实体 +normalized_low_path/+normalized_hd_path；+§24 ADR-010 完整决策记录（产物表/进度上报/磁盘成本/为什么不选 A/B/C/回滚策略）
+- `.context/state.json`: next_task M1.6 estimate_days 1.0→1.3, key_design_decisions 7→13 项, blocks +M3.4/M3.5
+
+### Test fixture confirmed
+- 用户上传位置: `~/Downloads/英语启蒙误区与脑科学.mp4`
+- 实测: 35MB / 1376×768 / 24fps / 628.8s (~10min) / H.264+AAC / 中文教学
+- 验证: ffprobe 已确认存在且可解析
+
+### Verification
+- design.md 行数: 2282 → 2336 (+54, ADR-010 含完整决策记录)
+- state.json: JSON 校验通过
+- git commit 56cf8e4: 4 files / +117 / -36
+
+### Next
+- M1.5 真机测试 (用户并行执行 scripts/test_whisper_realvideo.sh)
+- M1.6 实现 (executing-plans skill, batch=3): utils/ffmpeg.py + pipeline/ingest.py + tests
+- 系统依赖已验证: ffmpeg 7.1.1 ✅
