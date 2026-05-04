@@ -72,7 +72,7 @@ def clear_stage_handlers() -> None:
 # their `register_stage_handler()` side effects.
 # Modules are added here as they're implemented in M1.6, M1.7, M1.8...
 _STAGE_MODULES: tuple[str, ...] = (
-    # "autoclip.pipeline.ingest",
+    "autoclip.pipeline.ingest",  # M1.6 — dual-track normalize + audio extract
     # "autoclip.pipeline.index",
     # "autoclip.pipeline.scripting",
     # "autoclip.pipeline.assembly",
