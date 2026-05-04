@@ -458,3 +458,38 @@
 - M1.7 PySceneDetect shot detector (0.5d, 依赖 M1.6 normalized_low.mp4) — algo/shot_detector.py + 单测
 - M1.8 Index stage handler (1d) — 集成 M1.5 ASR + M1.7 shot + 删 audio.wav (兑现 K9)
 - M1 milestone 端到端验收 (M1.8 完成后): curl POST /api/jobs 5min 短片 2min 内完成 ingest+index, shots.json + asr.json 产出
+
+---
+
+## Session 8 (2026-05-04 21:46) — M1.7 单 batch 闭环 (0.4d 实际工时, 比估 0.5d 提前)
+
+### 关键流程决策
+- **executing-plans skill 单 batch 简化**: M1.7 任务小 (3 个文件 / 0.5d), 用户授权"继续" → 不再走 batch=3 stop&report 流程, 直接单 batch 闭环 (创建 → 自测 → commit → worktree-save)
+- **dataclass/ORM 同名共存模式**: algo/shot_detector.py 的 `Shot` dataclass 与 models/shot.py 的 `Shot` ORM 共用名字, 因 import path 不同不会冲突, 与 ASRSentence (providers/asr/base.py dataclass + models/shot.py ORM) 完全一致 → 命名一致性优于 SomethingDTO/SomethingDataclass 这种笨拙的后缀方案
+- **lazy import 优化决策**: scenedetect 触发 cv2/av 加载, 启动有 ~200ms 开销 + libavdevice 双链接警告 → 模块级 import 会拖累 ingest/scripting/render 这些不需要 shot 检测的阶段, 改为函数内 lazy import (LocalWhisperProvider 也用同款模式)
+
+### 流程亮点
+- ✅ **M1.7 提前完工**: 估 0.5d, 实际 0.4d (Shot dataclass 复用 ASRSentence 风格 + 测试模式可复用 → 减少 think time)
+- ✅ **lint-as-code-review 一次过**: ruff 4 处 SIM117 + 1 处 I001 一并修, pytest 17 + 150 全绿, 无返工
+- ✅ **测试覆盖完整**: 17 个用例覆盖 (constants / Shot 5 项校验 / 文件错误 3 类 / happy path / idx 升序不变量 / 自定义 threshold / fallback / 零时长边界 / fps fallback)
+
+### Pitfall 记录
+- ⚠️ scenedetect 启动 cv2/av libavdevice 双链接警告 (`Class AVFFrameReceiver is implemented in both ...`) → 不影响功能, 是 cv2 与 av 都打包了 ffmpeg 但版本不同; 后续如果 M1.8 集成测试看到这个警告可以忽略
+- ❌ ruff 4 处 SIM117 又出现了 (本会话累计第 3 次同类型问题) → 已养成习惯, 下次写 mock with 嵌套时直接用 `with (a, b, c):` 单语法
+
+### Verification (Session 8 累计)
+- 2 个 commit: d307ffe (M1.7 实现, amended from e25f07a) + 待 commit (worktree-save 收尾)
+- 测试总数: 137 (133p+4s) → 154 (150p+4s) (净增 +17)
+- M1 进度: 6/8 → 7/8 (M1.7 ✅; M1.8 是最后一个)
+
+### Post-Review 自检 (用户触发的"未实现/假设实现"复盘)
+- 用户在 commit 后触发自检 → 发现 1 处确凿死代码 (`_build_video_duration_fallback_shot` 占位符, 仅 raise NotImplementedError, 从未被调用) + 2 处瑕疵 (test_shot_is_frozen 异常断言过宽 + FALLBACK_FPS 注释 "cap" 措辞误导)
+- 立即修复并 git commit --amend (e25f07a → d307ffe), 472 行 → 459 行 (-13 行死代码), 17 测仍全绿
+- **教训**: 写代码先开占位接口、最后改成内联实现时, 必须立即删占位符; 写"helper exists for symmetry/readability" 这种自相矛盾的 docstring 是 red flag → 下次自检要先 grep `NotImplementedError`
+- **收益**: 自检流程价值显著, 用户的"严禁未实现/假设实现"硬约束被实际触发并修复; 类似的占位符模式以后开发时必须立刻补全或立刻删除, 不能跨 commit 留
+
+### 下一步 (Session 9)
+- M1.8 Index stage handler (1d, 估单 batch 闭环) — pipeline/index.py + tests/integration/test_index.py
+  - 流程: detect_shots(normalized_low.mp4) -> shots.json; LocalWhisperProvider().transcribe(audio.wav) -> asr.json; os.unlink(audio.wav) [K9]; mark INDEX DONE
+  - 进度: 0.0 -> 0.3 (shots) -> 0.95 (asr) -> 1.0 (cleanup); cancel 检查点在 ASR 调用前
+- M1 milestone 端到端验收 (M1.8 完成后, 8/8 收官): curl POST /api/jobs 5min 短片 2min 内 ingest+index 全 done, shots.json + asr.json 产出, audio.wav 已删

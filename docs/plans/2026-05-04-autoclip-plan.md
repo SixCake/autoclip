@@ -31,7 +31,7 @@ docs/plans/
 
 | Milestone | 周 | 任务数 | 详细文档 | 状态 | 完成 % |
 |---|---|---|---|---|---|
-| **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | 🟢 进行中 | 6/8 (M1.1-M1.6 ✅; M1.7/M1.8 待) |
+| **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | 🟢 进行中 | 7/8 (M1.1-M1.7 ✅; M1.8 待) |
 | **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | ⏳ 待开始 | 0/6 |
 | **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 5 | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始 | 0/5 |
 | **M3** — Render + Web + 零知识架构 | W4 | 9 | [`tasks/M3-render-web-compliance.md`](./tasks/M3-render-web-compliance.md) | ⏳ 待开始 | 0/9 |

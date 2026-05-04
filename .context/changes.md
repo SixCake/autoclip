@@ -627,3 +627,42 @@ User in pre-M1.5 phase:
 - M1.7 PySceneDetect shot detector (0.5d, 依赖 M1.6 normalized_low.mp4)
 - M1.8 Index stage handler (1d, 集成 M1.5 ASR + M1.7 shot, 删 audio.wav 兑现 K9)
 - M1 milestone 端到端验收 (M1.8 完成后): curl POST /api/jobs 5min 短片 2min 内完成 ingest+index
+
+---
+
+## Session 8 — 2026-05-04 21:46
+
+### Trigger
+- 用户输入"继续" → 推进 M1.7 (executing-plans skill batch=1, 单 batch 闭环)
+
+### Decisions
+- **M1.7 PySceneDetect shot detector 实施** (commit e25f07a):
+  - 命名冲突解决: algo/shot_detector.py 的 dataclass `Shot` 与 models/shot.py 的 ORM `Shot` 同名共存 (不同 import path), 与 ASRSentence dataclass-vs-ORM 模式一致
+  - lazy import scenedetect (cv2/av 启动慢, 模块级 import 会拖累 ingest/scripting/render 不必要的负载)
+  - fps fallback: 部分容器报 0fps → 降级用 FALLBACK_FPS=25.0 算 min_scene_len_frames
+  - 零场景边界 fallback: 单镜头覆盖全片 (避免下游空数组 panic)
+  - 零场景 + 零时长 → ShotDetectionError (不可恢复, 让上游 mark FAILED)
+
+### Files Added/Modified
+- `src/autoclip/algo/__init__.py` — NEW (commit d307ffe, amended from e25f07a)
+- `src/autoclip/algo/shot_detector.py` — NEW Shot dataclass + detect_shots() (commit d307ffe)
+- `tests/unit/test_shot_detector.py` — NEW 17 单元测试 (commit d307ffe)
+
+### Post-Review 修复 (用户触发 "未实现/假设实现" 自检)
+- 删除 `_build_video_duration_fallback_shot` 死代码 helper (13 行, 仅 raise NotImplementedError, 从未被调用; fallback 实际内联在 detect_shots() 里) → amend e25f07a → d307ffe
+- `test_shot_is_frozen`: `pytest.raises((AttributeError, Exception))` → `pytest.raises(FrozenInstanceError)` (前者断言强度 ≈ 0, 因为 Exception 是所有异常基类)
+- `FALLBACK_FPS` 注释: "Cap on probe-time fps fallback" → "Default fps used when scenedetect cannot read fps from the source file" (前者 "cap" 措辞误导, 实际是默认回退值)
+- 验证: ruff All checks passed / read_lints clean / 150 passed + 4 skipped 全绿 / grep 无 TODO|FIXME|NotImplemented 残留
+
+### Verification
+- pytest 全量回归: 133 → 150 passed + 4 skipped (净增 +17 测试)
+- ruff: All checks passed (顺手修了 3 处 SIM117 + 1 处 I001)
+- read_lints: No lint errors found
+- 性能: scenedetect 0.6.7.1 启动有 cv2/av libavdevice 双链接警告, 不影响功能
+- 设计契约 7 项 → 实现验证全绿 (threshold=27.0 / min_scene_len=0.8s*fps / fallback / algo 独立 / list[Shot] / Shot dataclass with frozen+post_init / lazy import)
+
+### Next
+- M1.8 Index stage handler (1d, 单 batch 闭环): pipeline/index.py + integration/test_index.py
+  - 集成 M1.5 LocalWhisperProvider + M1.7 detect_shots(); 删 audio.wav 兑现 K9
+- M1 milestone 端到端验收 (M1.8 完成后, 8/8 收官)
+- 测试约定: M1.5 集成测试已建立 RUN_INTEGRATION=1 先例; M1.6 集成测试已落地 (3 skip); M1.8 集成测试将复用同一约定, 端到端验证 ingest -> index 全链路
