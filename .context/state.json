@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.4.5-executing",
+  "version": "0.5.0-executing",
   "stage": "executing",
-  "phase": "M1-infrastructure-in-progress (4/8 tasks; v0.4 adhoc applied 2026-05-04 15:30)",
-  "current_focus": "M1.1+M1.2+M1.3+M1.4 done; v0.4 adhoc done (ASR本地化+LLM角色推断); next M1.5 LocalWhisperProvider",
+  "phase": "M1-infrastructure-in-progress (5/8 tasks)",
+  "current_focus": "M1.5 done (LocalWhisperProvider, 26 new tests, 99% cov on providers/asr); next M1.6 Ingest stage (FFmpeg normalize + audio extract)",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
   "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
@@ -15,62 +15,45 @@
       "path": "docs/plans/tasks/M1-infrastructure.md",
       "lines": 354,
       "tasks": 8,
-      "tasks_completed": 4,
+      "tasks_completed": 5,
       "estimate_days": 6.5,
-      "estimate_days_v03": 7.0,
       "status": "in_progress",
-      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4"],
-      "next_tasks": ["M1.5", "M1.6", "M1.7", "M1.8"],
-      "v04_changes": ["M1.5 重写: AliyunASR 5步OSS流水线 → LocalWhisperProvider (faster-whisper + large-v3); 工期 1d → 0.5d"]
+      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5"],
+      "next_tasks": ["M1.6", "M1.7", "M1.8"]
     },
-    "M2a": {
-      "path": "docs/plans/tasks/M2a-scripting-main.md",
-      "lines": 304,
-      "tasks": 6,
-      "estimate_days": 5.5,
-      "status": "pending",
-      "v04_changes": [
-        "M2a.2 prompt 升级: PlotOutline.main_characters 从 list[str] 升级为 list[Character{role,name?,description}]; KeyAct 增加 involved_characters; ADR-009 路径2",
-        "M2a.3 prompt 升级: plot_summary 风格预设强制使用角色称呼('男主'/'女主')替代'有人','某人'; 角色信息缺失时 fallback 到 v0.3 行为"
-      ]
-    },
+    "M2a": {"path": "docs/plans/tasks/M2a-scripting-main.md", "lines": 304, "tasks": 6, "estimate_days": 5.5, "status": "pending"},
     "M2b": {"path": "docs/plans/tasks/M2b-scripting-robust.md", "lines": 282, "tasks": 5, "estimate_days": 6.0, "status": "pending"},
     "M3": {"path": "docs/plans/tasks/M3-render-web-compliance.md", "lines": 466, "tasks": 9, "estimate_days": 10.25, "status": "pending"},
     "M4": {"path": "docs/plans/tasks/M4-e2e-validation.md", "lines": 320, "tasks": 5, "estimate_days": 5.5, "status": "pending"}
   },
   "total_tasks": 33,
-  "tasks_completed_overall": 4,
-  "completion_pct": 12.12,
-  "execution_strategy": "subagent-driven (in-session). M1.5 batch=1 (LocalWhisperProvider 集成简单, 无外部凭证依赖, 可单独验证)",
+  "tasks_completed_overall": 5,
+  "completion_pct": 15.15,
+  "execution_strategy": "subagent-driven (in-session). M1.6 batch=1 (FFmpeg normalize + audio extract; 1d; 系统需有 ffmpeg 二进制)",
   "next_task": {
-    "id": "M1.5",
-    "title": "ASRProvider abstract base + LocalWhisperProvider impl (faster-whisper + large-v3, zero network)",
-    "subdoc": "docs/plans/tasks/M1-infrastructure.md (search '### M1.5')",
+    "id": "M1.6",
+    "title": "Ingest Stage (FFmpeg normalize + audio extract)",
+    "subdoc": "docs/plans/tasks/M1-infrastructure.md (search '### M1.6')",
     "files": [
-      "src/autoclip/providers/__init__.py",
-      "src/autoclip/providers/asr/__init__.py",
-      "src/autoclip/providers/asr/base.py",
-      "src/autoclip/providers/asr/local_whisper.py",
-      "tests/unit/test_asr_base.py",
-      "tests/integration/test_local_whisper.py (default skipped, needs RUN_INTEGRATION=1)",
-      "scripts/preload_whisper.py (optional, R15 mitigation)"
+      "src/autoclip/utils/__init__.py",
+      "src/autoclip/utils/ffmpeg.py",
+      "src/autoclip/pipeline/ingest.py",
+      "tests/unit/test_ffmpeg_utils.py",
+      "tests/integration/test_ingest.py"
     ],
-    "estimate_days": 0.5,
-    "estimate_days_v03": 1.0,
+    "estimate_days": 1.0,
     "key_design_decisions": [
-      "ASRProvider abstract base unchanged: transcribe(audio_path, language='zh') -> ASRResult",
-      "ASRSentence(idx, start_sec, end_sec, text, confidence, speaker=None) — speaker MVP 永远为 None (ADR-009 路径2)",
-      "ASRResult dataclass: sentences list + language + provider + to_dict()",
-      "LocalWhisperProvider 构造: model_size='large-v3' / device='auto' / compute_type='default'",
-      "模型单例 _MODEL_SINGLETON: WhisperModel | None = None (避免子进程内重复加载 3GB)",
-      "transcribe 调用: model.transcribe(audio, language='zh', beam_size=5, vad_filter=True, word_timestamps=False)",
-      "VAD 默认开启 → 90min 电影实际推理 12-18min (M3 Pro 4-5x 实时率)",
-      "后处理: 合并<1s段, 过滤avg_logprob<-1.0段, 跳过空文本段",
-      "失败兜底: 模型加载失败 → 降级 medium (1.5GB); 仍失败抛 RuntimeError",
-      "依赖: faster-whisper>=1.0 (已在 pyproject.toml 替换 alibabacloud-nls-python-sdk)"
+      "ffmpeg utils 层封装: probe_video / build_normalize_cmd / build_extract_audio_cmd",
+      "normalize: H.264 720p 25fps, libx264 + crf=23 + faststart",
+      "extract_audio: -vn -ac 1 -ar 16000 -c:a pcm_s16le (16kHz mono WAV, 喂给 LocalWhisperProvider)",
+      "进度上报: 0.1 (probe) → 0.6 (normalize) → 0.95 (audio) → 1.0 (DONE)",
+      "Cancel 自检: normalize 和 audio 之间检查 is_cancelled()",
+      "handler 签名: run_ingest(job_dir, stage_name) → register_stage_handler(Stage.INGEST, run_ingest)",
+      "失败兜底: 任何异常都 mark FAILED 并抛出 (让父进程感知 exitcode)"
     ],
-    "depends_on_completed": ["M1.1 Settings (whisper_model_size / whisper_device / whisper_compute_type 已添加)"],
-    "blocks": ["M1.8 (Index→ASR integration)"]
+    "depends_on_completed": ["M1.4 (PipelineRunner + register_stage_handler)"],
+    "blocks": ["M1.7 (Shot detector 需要 normalized.mp4)", "M1.8 (Index stage 需要 audio.wav)"],
+    "system_deps": ["ffmpeg (brew install ffmpeg / apt install ffmpeg-7)", "ffprobe"]
   },
   "infra_baseline": {
     "python_version": "3.13.3",
@@ -82,7 +65,10 @@
     "linter": "ruff 0.7.4",
     "type_checker": "mypy 1.13.x",
     "web_server": "uvicorn (autoclip.main:app), verified GET /health 200 OK",
-    "host_machine": "Apple M3 Pro / 11-core / 36GB / arm64 (本地 ASR 性能验证: large-v3 实时率 4-5x)"
+    "host_machine": "Apple M3 Pro / 11-core / 36GB / arm64",
+    "key_deps_runtime": {
+      "faster-whisper": "1.2.1 (installed; weights need preload via scripts/preload_whisper.py for ~3GB large-v3)"
+    }
   },
   "cross_process_channels": {
     "stage_module_injection": {
@@ -91,6 +77,13 @@
       "purpose": "spawn subprocess can't inherit parent monkeypatch; env vars do survive spawn boundary",
       "introduced_by": "M1.4 (debug)",
       "used_by": "tests/integration/test_pipeline_resume.py + future plugin systems"
+    },
+    "whisper_singleton": {
+      "module": "autoclip.providers.asr.local_whisper",
+      "globals": ["_MODEL_SINGLETON", "_LOADED_MODEL_SIZE"],
+      "purpose": "单进程内复用 WhisperModel 实例; spawn 子进程会独立加载 (符合 multiprocessing 隔离语义)",
+      "test_helper": "_reset_singleton_for_tests()",
+      "introduced_by": "M1.5"
     }
   },
   "v04_adhoc_summary": {
@@ -101,22 +94,6 @@
       "ASR: AliyunASRProvider → LocalWhisperProvider (faster-whisper + large-v3)",
       "角色: 路径2 LLM 文本推断 (不做声纹), ASRSentence.speaker 仍 None"
     ],
-    "files_changed": [
-      "docs/plans/2026-05-04-autoclip-design.md (+175 lines, Part IV §21-§23)",
-      "docs/plans/2026-05-04-autoclip-plan.md (env section + risk table + changelog)",
-      "docs/plans/tasks/M1-infrastructure.md (M1.5 重写, 总工时 7d→6.5d)",
-      "docs/plans/tasks/M2a-scripting-main.md (M2a.2 + M2a.3 prompt 增强)",
-      ".context/design.md (索引 v0.3→v0.4)",
-      ".context/plan.md (executing 阶段标记 + 子文档变更说明)",
-      "src/autoclip/config.py (-aliyun_asr_*, +whisper_model_size/device/compute_type)",
-      ".env.example (-ALIYUN_ASR_*, +WHISPER_*)",
-      "tests/unit/test_config.py (字段断言更新, +test_no_legacy_aliyun_asr_fields, +test_whisper_defaults)",
-      "pyproject.toml (-alibabacloud-nls-python-sdk, +faster-whisper)"
-    ],
-    "schema_unchanged": [
-      "models.shot.ASRSentence (speaker 字段保留 Optional[str]=None)",
-      "ASRProvider 抽象基类签名 transcribe(audio_path, language) -> ASRResult"
-    ],
     "kpi_impact": "K9 由 OSS object cleanup 简化为本地 audio.wav cleanup, 实质更彻底 (音频从未离开本地)"
   },
   "git_log": [
@@ -125,15 +102,25 @@
     {"sha": "1c9bb0d", "msg": "✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests", "files": 8, "lines": 649},
     {"sha": "5454bda", "msg": "✨feat: M1.3 file-based state machine for pipeline orchestration", "files": 3, "lines": 437},
     {"sha": "4c49a44", "msg": "🚧 chore: gitignore coverage artifacts", "files": 1, "lines": 5},
-    {"sha": "71e5f07", "msg": "✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing", "files": 9, "lines": 1273}
+    {"sha": "71e5f07", "msg": "✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing", "files": 9, "lines": 1273},
+    {"sha": "bef6b60", "msg": "📝docs: v0.4 adhoc - localize ASR + LLM-based character inference", "files": 4, "lines": 313},
+    {"sha": "2747ef1", "msg": "🎨refactor: replace aliyun_asr settings with local whisper config (M1.5 prep)", "files": 4, "lines": 85},
+    {"sha": "444a3dc", "msg": "📝docs: initialize .context/ workspace tracking (v0.4.5 state)", "files": 5, "lines": 1126}
   ],
   "test_status": {
-    "total_tests": 46,
-    "passed": 46,
+    "total_tests": 75,
+    "passed": 74,
+    "skipped": 1,
     "failed": 0,
-    "execution_time_sec": 1.69,
-    "coverage_pct": 96,
-    "note": "v0.4 adhoc 修改了 test_config.py (净 +2 用例: test_whisper_defaults + test_no_legacy_aliyun_asr_fields), 总数预期变 48; 待 todo #12 验证"
+    "execution_time_sec": 1.87,
+    "coverage_overall_pct": 96,
+    "coverage_providers_asr_pct": 99,
+    "new_in_m1_5": {
+      "test_asr_base.py": 12,
+      "test_local_whisper_unit.py": 14,
+      "test_local_whisper.py (integration)": 1,
+      "_total_new": 27
+    }
   },
   "kpi_tracking": {
     "K1_binding_accuracy": {"target": ">=0.7", "verified_at": "M2b.5", "actual": null},
@@ -142,12 +129,12 @@
     "K4_user_score": {"target": ">=4/5", "verified_at": "M4.2", "actual": null},
     "K5_manual_tune_time": {"target": "<=1h/film", "verified_at": "M4.5", "actual": null},
     "K6_e2e_duration": {"target": "<=16min/90min", "verified_at": "M4.5", "actual": null},
-    "K7_resume": {"target": "subprocess kill recoverable", "verified_at": "M1+M3", "actual": "M1.3 next_stage_to_run unit-validated; M1.4 test_pipeline_resume.py validates K7 with REAL spawn subprocesses (3 cases: full run / skip 3 DONE / rerun FAILED)"},
-    "K8_test_coverage": {"target": "core algo >=70%", "verified_at": "ongoing", "actual": "96% (46 cases on Settings/ORM/StateMachine/Runner/API); v0.4 adhoc 后预期 +2 用例"},
-    "K9_raw_deleted": {"target": "100%", "verified_at": "M3.8", "actual": "v0.4 简化: 本地 audio.wav cleanup (M1.8) 替代 OSS object cleanup, 音频从未离开本地"},
-    "K10_no_original_path": {"target": "100%", "verified_at": "M3.4+M3.5", "actual": "schema-level enforced + M1.4 API source.mp4 path NOT in state.json (only convention data/{job_id}/source.mp4)"},
-    "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready: Job.agreement_accepted_at field accepted in POST /api/jobs (enforcement deferred to M3.9)"}
+    "K7_resume": {"target": "subprocess kill recoverable", "verified_at": "M1+M3", "actual": "M1.3+M1.4 validated"},
+    "K8_test_coverage": {"target": "core algo >=70%", "verified_at": "ongoing", "actual": "96% overall (74 cases); providers/asr 99% (M1.5)"},
+    "K9_raw_deleted": {"target": "100%", "verified_at": "M3.8", "actual": "M1.5 LocalWhisperProvider 不复制/外传音频; audio.wav cleanup 由 M1.8 兑现"},
+    "K10_no_original_path": {"target": "100%", "verified_at": "M3.4+M3.5", "actual": "schema-level enforced + 本地 ASR 强化 (音频从未离开本地)"},
+    "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-04T15:30:00+08:00"
+  "updated_at": "2026-05-04T18:35:00+08:00"
 }

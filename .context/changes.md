@@ -491,3 +491,56 @@ User in pre-M1.5 phase:
 ### Pending verification (todo #12)
 - 跑 pytest 确认 config 改动后所有测试通过
 - 预期: 46 → 48 测试 (新增 test_whisper_defaults + test_no_legacy_aliyun_asr_fields)
+
+---
+
+## 2026-05-04 (Session 5: M1.5 LocalWhisperProvider 实现)
+
+### Goal
+按 v0.4 ADR-004 三度修订与 M1-infrastructure.md M1.5 任务清单实现 ASRProvider 抽象 + LocalWhisperProvider（faster-whisper + large-v3）。
+
+### Decisions reaffirmed (no new design changes)
+- ASRSentence schema 与 ORM `models.shot.ASRSentence` 字段对齐 (idx/start_sec/end_sec/text/confidence/speaker=None)
+- ADR-009 路径 2: speaker 字段 MVP 永远为 None (4 个测试用例显式断言)
+- 模型单例 _MODEL_SINGLETON: 单进程复用; spawn 子进程独立加载 (符合 multiprocessing 隔离语义)
+- 失败兜底链: large-v3 → medium → RuntimeError (覆盖 R17 低配 Mac 风险)
+- 后处理三大过滤: 空文本 / avg_logprob<-1.0 / 短(<1s)且短文本(<4字符)的 glitch
+
+### Created files (8)
+**Source (4)**:
+- `src/autoclip/providers/__init__.py` (7 lines)
+- `src/autoclip/providers/asr/__init__.py` (8 lines)
+- `src/autoclip/providers/asr/base.py` (97 lines) — ASRProvider ABC + ASRSentence/ASRResult dataclass
+- `src/autoclip/providers/asr/local_whisper.py` (190 lines) — LocalWhisperProvider + 单例 + transcribe + 后处理 + 兜底
+
+**Tests (3)**:
+- `tests/unit/test_asr_base.py` (127 lines) — 12 用例 (sentence 字段/校验/to_dict + result 聚合 + ABC 契约)
+- `tests/unit/test_local_whisper_unit.py` (247 lines) — 14 用例 (defaults/file-not-found/post-processing/singleton/fallback chain)
+- `tests/integration/test_local_whisper.py` (64 lines) — 1 用例 (默认 skip; RUN_INTEGRATION=1 + tests/fixtures/audio_5s_zh.wav 启用)
+
+**Scripts (1)**:
+- `scripts/preload_whisper.py` (49 lines) — R15 缓解; 提前下载 ~3GB 权重到 ~/.cache/huggingface/hub/
+
+### Modified files (1)
+- `poetry.lock` — `poetry lock` 重写以匹配 pyproject.toml v0.4 deps (faster-whisper + onnxruntime + tokenizers + huggingface-hub 等)
+
+### Implementation notes
+- **WhisperModel 提到模块级 import**（最初写成函数内 lazy import，导致 unittest.mock.patch 找不到 attribute；fix: 改为 `from faster_whisper import WhisperModel` at module top, 删 TYPE_CHECKING 块）
+- ruff/format 修复: I001 import sort × 2, F401 unused × 1, SIM300 yoda × 1, SIM108 ternary × 1; 4 文件 ruff format 重格式化
+- mypy strict 兼容: 所有公共方法签名完整标注; ABC 抽象方法用 `...` 占位
+
+### Verification
+- pytest: **74 passed, 1 skipped in 1.87s** (48 → 74; 26 个 M1.5 单元测试 + 1 个集成测试 skipped)
+- ruff check: All checks passed!
+- ruff format --check: 8 files already formatted
+- read_lints: No lint errors found
+- coverage: providers/asr 99% (base.py 97% / local_whisper.py 100% / __init__ 100%)
+
+### KPI impact
+- K8 (test coverage core algo ≥70%): 整体 96%, providers/asr 99% — 远超目标
+- K9 (raw deleted): LocalWhisperProvider 不复制/外传音频 (本地路径单向读取); audio.wav cleanup 由 M1.8 兑现
+- K10 (草稿不含原片路径): 强化 — 音频从未离开本地
+
+### Next
+- M1.6 Ingest stage (FFmpeg normalize + audio extract); 1.0d
+- 系统依赖: ffmpeg + ffprobe (brew install ffmpeg)

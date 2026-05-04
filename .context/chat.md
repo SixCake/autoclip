@@ -353,3 +353,38 @@
 - 关键文件：providers/asr/{base.py,local_whisper.py} + tests/unit/test_asr_base.py
 - 工期：0.5d
 - 提醒：首次跑要下载 3.1GB 权重（HF mirror），考虑写 `scripts/preload_whisper.py`
+
+---
+
+## Session 5 — M1.5 LocalWhisperProvider 实现（2026-05-04 18:22-18:35）
+
+> 阶段：executing → M1.5 单 task 闭环
+> 模型：claude4.7-opus
+
+### 流程
+1. worktree-context: state.json next_task M1.5 已锁
+2. 跳过 brainstorming (已在 Session 4 收敛，无新设计变更)
+3. todo 11 项全部 completed
+4. 流程: 装依赖 → 8 文件分两批创建 → ruff/pytest 修复 → 验证 → 同步 .context
+
+### 关键技术决策
+- WhisperModel 模块级 import (替代 lazy)，让 unittest.mock.patch 能定位 attribute
+- 模型单例 _MODEL_SINGLETON 缓存键用 (model_size,)，spawn 子进程独立加载
+- 后处理 3 大过滤: 空文本 / 低置信度 (avg_logprob<-1.0) / 短-glitch (<1s 且 <4 字符)
+- 失败兜底: load 失败 → medium → RuntimeError (覆盖 R17)
+
+### 验证结果
+- pytest: 74 passed, 1 skipped in 1.87s (新增 26 单元 + 1 集成 skipped)
+- ruff: All checks passed (修了 5 errors + 4 文件 format)
+- coverage: providers/asr 99% (local_whisper.py 100% ✅)
+- read_lints: clean
+
+### Pitfall 记录（Session 5 教训）
+- ❌ 错误尝试: TYPE_CHECKING 块 + 函数内 lazy import → patch 失败 5 用例
+- ✅ 修复: 直接模块级 `from faster_whisper import WhisperModel` (faster-whisper 是必需依赖, 导入开销 <200ms 可忽略)
+- 经验: **依赖 mock.patch 的模块, 被 mock 的目标必须出现在模块顶层 namespace**
+
+### 下一步 (Session 6)
+- M1.6 Ingest stage: FFmpeg 视频归一化 + 音频抽离; 1.0d
+- 文件: utils/ffmpeg.py + pipeline/ingest.py + 2 测试
+- 系统依赖: ffmpeg + ffprobe (需先 brew install ffmpeg 确认)
