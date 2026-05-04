@@ -289,7 +289,6 @@ def test_run_index_missing_low_raises(tmp_path: Path):
     state = JobStateFile(tmp_path)
     state.init_state(job_id=1, video_hash="x", target_duration_sec=10)
     (tmp_path / AUDIO_FILENAME).write_bytes(b"a")  # only audio, no low
-    _ = state  # quiet ruff (state used implicitly via init_state side effect)
     with pytest.raises(IndexStageError, match=f"required input missing.*{LOW_FILENAME}"):
         run_index(tmp_path)
 
@@ -298,7 +297,6 @@ def test_run_index_missing_audio_raises(tmp_path: Path):
     state = JobStateFile(tmp_path)
     state.init_state(job_id=1, video_hash="x", target_duration_sec=10)
     (tmp_path / LOW_FILENAME).write_bytes(b"l")  # only low, no audio
-    _ = state
     with pytest.raises(IndexStageError, match=f"required input missing.*{AUDIO_FILENAME}"):
         run_index(tmp_path)
 

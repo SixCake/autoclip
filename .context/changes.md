@@ -800,3 +800,26 @@ User in pre-M1.5 phase:
 - **修 bug 后必须立即 read 真正的运行时调用方, 而不是依赖测试覆盖证明正确性**. 单测特别擅长**绕过运行时上下文** (mock/patch/直接调函数), 这种"绕过"使得测试和生产路径的契约可能完全不同. Round 3 的 test_run_index_marks_running_before_shot_detection 单测确实通过了, 但这只证明了"handler 单独运行时会按我加的方式 mark RUNNING", 不证明"handler 在 runner 真实路径下应该这么做"
 - **测试设计要主动反向断言**, 不能只断言期望的 (positive). test_handler_does_not_redundantly_mark_running 用 `assert (RUNNING, 0.0) not in handler_calls` 这种**反向 assertion** 来明确捕获"handler 不该做什么", 才能防止未来有人不小心又把 mark_stage(RUNNING, 0.0) 加回来. Positive-only 测试 ("verify handler does X") 不能防止 "handler 也偷偷做了 Y" 这种回归
 - **用户连续三次问相同问题这个模式本身就是测试**: 用户在测试 agent 是否真有自检能力, 还是每轮只能挤出一些表面修复. 第一次发现 1 处 (#m1.8-8), 第二次发现 5 处 (Round 2), 第三次发现 3 处 + 我修错 1 处 (Round 3+4). **每轮发现的 bug 数趋势是递减的, 但 Round 4 出现自我回归说明"修复行为本身需要自检"**. 长期改进目标: 把"语义自检 + 跨模块契约对齐 + 测试反向断言"做成每轮 handler 实现的强制 checklist, 不是事后救火
+
+### Post-Implementation Self-Check Round 5 (用户第四次主动追问触发, Round 4 仍有遗漏 + 发现跨 milestone 历史 contract bug)
+**触发**: 用户**第四次**输入完全相同的自检问题. 这次重点警惕 Round 4 自身可能引入的回归 (Round 3→4 已经发生过一次自我回归, 不能假设 Round 4 一定干净). 完整重新 read 了 Round 4 commit 后的 index.py 全文 + test_index_handler.py 全文 + 这次额外 read 了之前没读完的 runner.py L1-60 (StageHandler Protocol 定义段) + ingest.py L120-320 (run_ingest 末段) 做横向对照
+
+**发现 1 处 must-fix (Round 4 遗漏的 dead code)**:
+- **5-1 test_index_handler.py L292 + L301 两行 `_ = state` 是 dead code**. Round 4 commit 后这两行还在, 注释 `# quiet ruff (state used implicitly via init_state side effect)` 也是错的. 实测验证: dry-run 临时删除两行后 `ruff check` 输出 "All checks passed!" — 因为 `state.init_state(...)` 这种**方法调用 on local variable** 在 ruff F841 检测视角下算"used", 根本不需要 `_ = state` 来"quiet ruff". 这两行是历史某版本的残留 (那个版本可能直接 `JobStateFile(tmp_path).init_state(...)` 单链式没有局部变量), 后来重构成 `state = ...` + `state.init_state(...)` 两行后, 误以为还需要 `_ = state` 防 ruff. 必须删除
+
+**发现 1 处 out-of-scope contract bug (记录为 LIM#8, 留 M2a kickoff 前 tech debt cleanup)**:
+- **LIM#8 runner.py L48-50 StageHandler Protocol docstring 与 L142 _stage_entrypoint 实现自相矛盾**. Protocol docstring 明确写 "Handler must mark its own RUNNING and DONE/FAILED states via JobStateFile", 但 _stage_entrypoint 在调 handler 之前已经替它 mark 了 `RUNNING + progress=0.0 + started_at`. **这是 M1.4 的历史 contract bug**, 让 Round 3 的我读了 docstring 后误以为 handler 必须自己标 RUNNING (从而引入 BUG#7), Round 4 又靠读实现才发现 docstring 是错的. 要根治必须改 runner.py 的 docstring (说 "Handler MUST mark its own DONE/FAILED, but RUNNING is owned by the entrypoint and should NOT be re-marked"). 不在 M1.8 修(避免动 M1.4 已锁定的 commit + 影响范围超出 self-check scope), 记入 LIM#8, M2a kickoff 前 tech debt 一并修复 — 否则下一个 handler 作者(M2a scripting/M2b assembly/M3 render)读 docstring 大概率会重蹈 BUG#7 覆辙
+
+**1 处 NOT-bug 排除**:
+- `test_handler_signature_matches_runner_contract` 用 `inspect.signature` 只检查参数名 + 字符串/类型相等性 (`sig.return_annotation in (None, "None")`), 看似"弱测试". 但实际上它**仍是有效的签名回归保护**: 若未来 run_index 加新参数(如 `*, dry_run=False`), `list(sig.parameters) == ["job_dir"]` 会 fail; 若返回类型从 `None` 变成别的, `sig.return_annotation in (None, "None")` 也会 fail. 这种 string-vs-type 的双轨断言是为了适配 PEP 563 deferred annotation evaluation (因为 `from __future__ import annotations` 会把所有类型注解变成字符串), 不是测试质量问题. 不修
+
+**Round 5 修复后验证**:
+- ruff default + ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- pytest 全量回归: 仍是 179 passed + 6 skipped (代码语义零变化, 仅删除 2 行 dead code)
+- read_lints: No lint errors found
+- git diff: 精确只删除 2 行 (无误伤其他代码)
+
+**Round 5 最深教训 (元教训, 关于多轮自检的有效性)**:
+- **dead code 是多轮自检最大的盲区**: 它不影响功能(测试照过)、不报 lint(ruff 全绿)、阅读时容易因"看起来像有意为之"(那条注释 `# quiet ruff` 给了 false sense of intent) 而被跳过. Round 1-4 我都看过 test_index_handler.py 这两个函数, 但每次都被那条**伪解释性注释**误导, 以为 `_ = state` 是必要的. **真正消除 dead code 的唯一方法是 dry-run 实测删除后看是否还能通过所有检查**, 不能依赖代码推理或工具报告
+- **跨 milestone 的 contract drift 是 self-check 的边界**: LIM#8 不是 M1.8 的 bug, 但它**导致了** M1.8 Round 3 的 BUG#7. 这意味着 self-check 不能只看"当前 milestone 改了什么", 还要看"我做决策时依赖了哪些历史模块的契约文档, 这些文档准确吗". 但同时不能漫无边际去修历史模块 (会破坏 commit 隔离). 折中: 记录为 LIM, 在下一个相关 milestone 的 kickoff (M2a tech debt cleanup 段) 一并修, 避免污染当前提交
+- **每轮自检 bug 数: 1→5→3+1regression→1+1LIM**. Round 5 比 Round 4 少了一半, 趋势确实在收敛. **但收敛不等于零**: Round 5 还能找到 1 处必修 + 1 处 contract drift, 说明只要还在追问, 就还有东西可挖. 真正的"完成"信号不是"找不到 bug", 而是**当前 milestone scope 内的代码已经过逐行 read + 跨模块契约对齐 + dry-run 实测**, 且找到的 out-of-scope 问题已经被记录为 LIM 等待对应 milestone 处理
