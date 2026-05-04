@@ -273,16 +273,21 @@
   3. parse 失败 → try_repair_json → 重 parse；仍失败抛 ValueError → retry_with_repair 再试
 - **进度上报**: 0.05 / 0.3 (plot done) / 0.7 (IR done) / 0.9 (bind done) / 1.0
 - **Cancel 检查点**: 在每次 LLM 调用前
-- **style_preset 注入方式**（**adhoc plan-4 决策**）：M2a.6 **不改 `JobStateFile.init` schema**（避免 M1 baseline 漂移）。改用环境变量 `AUTOCLIP_STYLE_PRESET=plot_summary`（默认值）由 scripting handler 启动时直接 `os.environ.get(...)` 读取。state.json schema 改造推迟到 **M2b.5**（届时已经有 binder_version 字段升级，可一并做 schema bump，集中迁移成本）。
-  - **设计 rationale**：M1 e2e 验收完成前任何 state schema 变动都会让"M1 收工"成为浮动目标；环境变量是零侵入的兜底通道，M2b.5 schema 升级时 M2a 的 env 入口可保留作为 debug fallback。
+- **style_preset / target_duration_sec 注入方式**（**adhoc plan-4-rollback 校正, 2026-05-05**）：**直接从 `state.json` 读取**，无需 schema 改造。M1.4 已经实现完整链路：
+  - `src/autoclip/pipeline/state.py:91-98` `_JobMeta` dataclass 已有 `target_duration_sec: int` + `style_preset: str` 字段
+  - `src/autoclip/pipeline/state.py:122-128` `JobStateFile.init_state()` 签名已接受这两个参数
+  - `src/autoclip/api/jobs.py:103-107` `POST /api/jobs` Form 已接受 `target_duration_sec: Annotated[int, Form(ge=10, le=600)]`（必填）+ `style_preset: Annotated[str, Form()] = "plot_summary"`（可选默认值）
+  - M2a.6 handler 直接 `JobStateFile(job_dir).load()` 读 `_JobMeta` 字段即可，零改动
+  - 前端默认值规约（**adhoc Q5-corr C 文档化**）：M3.7 Web UI 表单的 `target_duration_sec` 输入框默认值 = `clamp(video_duration_sec / 10, 30, 600)`。这是用户体验默认值（在 UI 层 fallback），不是 API 层 fallback——API 层保持必填以防止"什么时候用 fallback"的隐式规则
+  - **回滚原因**：本 task 原 plan-4（commit 416bf55）写"M2a.6 用环境变量 AUTOCLIP_STYLE_PRESET 注入避免 schema 漂移"是基于错误假设——当时未 read state.py / api/jobs.py 真实代码，假设 M1.4 没实现这两个字段。Q5-corr 用 read_file 校正后发现 M1.4 已完整实现，env var 路径不仅多余还引入了"配置源歧义"（state.json vs env var 两个事实源）问题。本次回滚同时是 user_rules 第 7 条"严禁假设实现"的反面教材记录
 - **LIM#10 提醒**（**adhoc G2 补充, 2026-05-04 .context tech_debt**）：实现 scripting handler 后若**单跑** `pytest tests/unit/test_runner.py` 出现 `IngestError: raw directory missing` 是已知问题（LIM#10：`_stage_entrypoint` 内部调 `_load_stage_modules()` 重新 import 真 handler 覆盖 lambda），跑全量 `pytest tests/` 即 pass。本 task 不修 LIM#10，遗留到 M2a 收尾或首位踩坑开发者修复。
 
 **涉及文件**:
 - Create: `src/autoclip/pipeline/scripting.py`
 - Modify: `src/autoclip/pipeline/__init__.py`（追加 `from . import scripting`）
-- ~~Modify: `src/autoclip/pipeline/state.py`（init 增加 style_preset 字段）~~ **删除（推迟 M2b.5）**
-- ~~Modify: `src/autoclip/api/jobs.py`（POST /api/jobs 把 style_preset 传给 state.init）~~ **删除（推迟 M2b.5）**
-- Create: `tests/integration/test_scripting_e2e.py`（mock LLMProvider + monkeypatch `AUTOCLIP_STYLE_PRESET`）
+- ~~Modify: `src/autoclip/pipeline/state.py`（init 增加 style_preset 字段）~~ **本 task 不需要**（M1.4 已实现 `_JobMeta.style_preset` + `_JobMeta.target_duration_sec`）
+- ~~Modify: `src/autoclip/api/jobs.py`（POST /api/jobs 把 style_preset 传给 state.init）~~ **本 task 不需要**（M1.4 已实现 `POST /api/jobs` Form 字段）
+- Create: `tests/integration/test_scripting_e2e.py`（mock LLMProvider，从 mock `state.json._JobMeta` 读取 target_duration_sec / style_preset）
 
 **测试策略**:
 - 集成（mock LLM）: patch QwenProvider 返回固定 JSON，验证 timeline.json 结构正确 + state DONE
