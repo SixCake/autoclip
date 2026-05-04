@@ -705,3 +705,22 @@ User in pre-M1.5 phase:
 ### Next
 - **M1 e2e 验收** (0.2d, 人工): curl POST /api/jobs + 5min 短片 → 验证 2min 内 ingest+index 全 DONE / shots.json + asr.json 合规 / audio.wav 已删
 - **M2a Scripting 主链路** (W2, 6 个任务, ~5d) — 待 e2e 验收通过后启动 (锁定 shots.json + asr.json schema 后开工)
+
+### Post-Implementation Self-Check #m1.8-8 结论 (Session 9 收尾)
+- **死代码 grep**: TODO/FIXME/NotImplemented/placeholder/stub/simplified 全部 [CLEAN] no matches; index.py 的 4 处 pass/return None 全部确认是合法语义 (TYPE_CHECKING 占位 + _load_existing_shots 三个显式 fallback 返回值, 调用方 `if shots is None` 依赖); **0 处真死代码**
+- **状态一致性**: state.json M1.tasks_completed=8 / status=complete / overall=8 / next_task=M1-e2e / completion_pct=24.24=round(8/33*100,2) / git_log[-1]=ed0e0ff (== HEAD) **ALL CHECKS PASS**
+- **M1.8 lint 严格度**: M1.8 三个新文件 (index.py + test_index_handler.py + test_index.py) 在 ruff `--select F,E,W,UP,SIM,B,RUF` 严格规则下 **All checks passed!** (期间发现并 amend 修复了 2 处 E501: test_index_handler.py:280 happy_path with-block + L363 docstring, 都是 101 列超 1 列, 已合入 ed0e0ff)
+- **执行失误自纠**: 我口头说"amend 7a74d10 (M1.8 实现)" 实际 amend 的是 HEAD 即 worktree-save commit (936ce72 → ed0e0ff); **行为正确** (lint 修复挂在文档化 commit 比污染 M1.8 实现 commit 更干净), **描述错误** — 已记录在案; 由此触发 state.json git_log[-1] 同步修正 (faad1df) — 这是元数据自检的次生收益
+
+### Tech Debt 累积 (M1.1-M1.4 历史代码遗留, 不阻塞 M1, 留给独立 chore commit)
+17 处 ruff strict-only errors, 项目默认规则集是绿的, 但启用 `--select F,E,W,UP,SIM,B,RUF` 会暴露:
+- **14 × RUF100** (unused noqa directive): src/autoclip/api/jobs.py × 3 (BLE001/FBT002/PLR0913) / pipeline/runner.py × 2 (BLE001/SLF001) / pipeline/ingest.py × 1 (S603) / utils/ffmpeg.py × 1 (S603) / db.py × 1 (ANN001) / tests/unit/test_runner.py × 5 (ARG002 × 3 + BLE001 + S101) / tests/integration/test_ingest.py × 1 (S603) — 全是早期写代码时按"防御式 noqa"加的, 但项目从未启用对应规则; 修复策略: 直接删除所有 unused noqa (14 个 --fix 即可)
+- **2 × E501** (line too long): src/autoclip/config.py:6 (116 列) + src/autoclip/models/video.py:36 (101 列) — 历史 docstring/字段注释超长
+- **1 × RUF012** (mutable class attributes should be ClassVar): tests/unit/test_runner.py:63 — fake handler 类的 calls list 应该标 ClassVar
+- **建议处理时机**: M2a 启动前 1 个独立 `🚧chore: ruff strict cleanup (RUF100 + E501 + RUF012)` commit, ~10min 工作量; 若不处理也不影响后续, 但越积越多就更难 enforce
+
+### Verification 终态 (Session 9 全部交付)
+- 3 个 commit: 7a74d10 (M1.8 实现) + ed0e0ff (worktree-save, amend 含 lint 修复) + faad1df (state.json git_log 同步)
+- 测试: 154 → 183 (177 passed + 6 skipped), 净增 +29
+- M1.8 三个新文件 ruff strict 完全干净
+- 项目默认 ruff + read_lints + pytest 全绿; git working tree [CLEAN]
