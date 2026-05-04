@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.5.0-executing",
+  "version": "0.6.0-executing",
   "stage": "executing",
-  "phase": "M1-infrastructure-in-progress (5/8 tasks)",
-  "current_focus": "M1.5 done (LocalWhisperProvider, 26 new tests, 99% cov on providers/asr); next M1.6 Ingest stage (FFmpeg normalize + audio extract)",
+  "phase": "M1-infrastructure-in-progress (6/8 tasks)",
+  "current_focus": "M1.6 done (Ingest stage — dual-track normalize ADR-010 + audio extract; +59 tests net; commit 7d15cc5); next M1.7 PySceneDetect shot detector",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
   "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
@@ -15,11 +15,11 @@
       "path": "docs/plans/tasks/M1-infrastructure.md",
       "lines": 354,
       "tasks": 8,
-      "tasks_completed": 5,
-      "estimate_days": 6.5,
+      "tasks_completed": 6,
+      "estimate_days": 6.8,
       "status": "in_progress",
-      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5"],
-      "next_tasks": ["M1.6", "M1.7", "M1.8"]
+      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5", "M1.6"],
+      "next_tasks": ["M1.7", "M1.8"]
     },
     "M2a": {"path": "docs/plans/tasks/M2a-scripting-main.md", "lines": 304, "tasks": 6, "estimate_days": 5.5, "status": "pending"},
     "M2b": {"path": "docs/plans/tasks/M2b-scripting-robust.md", "lines": 282, "tasks": 5, "estimate_days": 6.0, "status": "pending"},
@@ -27,44 +27,41 @@
     "M4": {"path": "docs/plans/tasks/M4-e2e-validation.md", "lines": 320, "tasks": 5, "estimate_days": 5.5, "status": "pending"}
   },
   "total_tasks": 33,
-  "tasks_completed_overall": 5,
-  "completion_pct": 15.15,
-  "execution_strategy": "subagent-driven (in-session). M1.6 batch=1 (FFmpeg dual-track normalize low+hd + audio extract; 1.3d after v0.5 adhoc; 系统需有 ffmpeg 二进制)",
+  "tasks_completed_overall": 6,
+  "completion_pct": 18.18,
+  "execution_strategy": "subagent-driven (in-session). M1.7 batch=1 (PySceneDetect shot detector; 0.5d; depends on normalized_low.mp4 from M1.6)",
   "next_task": {
+    "id": "M1.7",
+    "title": "Index Stage: Shot detector (PySceneDetect ContentDetector)",
+    "subdoc": "docs/plans/tasks/M1-infrastructure.md (search '### M1.7')",
+    "files": [
+      "src/autoclip/algo/__init__.py",
+      "src/autoclip/algo/shot_detector.py",
+      "tests/unit/test_shot_detector.py"
+    ],
+    "estimate_days": 0.5,
+    "key_design_decisions": [
+      "算法: PySceneDetect ContentDetector(threshold=27.0, min_scene_len=0.8s*fps); 27.0 适合实拍内容, 动漫可调到 30+",
+      "数据结构: Shot(idx, start_sec, end_sec) dataclass + duration_sec property + to_dict() (与 ASRSentence 风格对齐)",
+      "fallback: 整片无场景切换 → 回退为单镜头覆盖全片 (避免下游空数组 panic)",
+      "独立模块: 放在 algo/ 而非 pipeline/, 便于 M2a/M2b 直接调用做 shot-level 单元测试",
+      "输入: normalized_low.mp4 (来自 M1.6); 不需要 hd (检测用 720p 够用且更快)",
+      "输出: list[Shot]; M1.8 Index handler 负责 dump 成 shots.json",
+      "性能目标: 90min 电影切分 < 60s, shot 数量典型 800-1500 (验收标准)"
+    ],
+    "depends_on_completed": ["M1.6 (provides normalized_low.mp4)"],
+    "blocks": ["M1.8 (Index stage 需要 shot_detector + asr 组合)"],
+    "system_deps": ["scenedetect (Python pkg, 已在 pyproject.toml; 不需要外部 binary)"]
+  },
+  "previous_task": {
     "id": "M1.6",
     "title": "Ingest Stage (FFmpeg dual-track normalize low+hd + audio extract) - v0.5 adhoc",
-    "subdoc": "docs/plans/tasks/M1-infrastructure.md (search '### M1.6')",
-    "files": [
-      "src/autoclip/utils/__init__.py",
-      "src/autoclip/utils/ffmpeg.py",
-      "src/autoclip/pipeline/ingest.py",
-      "tests/unit/test_ffmpeg_utils.py",
-      "tests/integration/test_ingest.py"
-    ],
-    "estimate_days": 1.3,
-    "key_design_decisions": [
-      "v0.5 adhoc: 双轨 normalize (design.md Part IV §24 ADR-010); 单轨 1.0d → 双轨 1.3d (+0.3d)",
-      "ffmpeg utils 层封装: probe_video / build_normalize_low_cmd / build_normalize_hd_cmd / build_extract_audio_cmd (4 个函数)",
-      "normalize_low: scale=-2:720, fps=25, libx264 crf=23 preset=medium faststart, aac 128k → 给 PySceneDetect/Whisper 喂料",
-      "normalize_hd: scale=-2:1080, 原 fps, libx264 crf=21 preset=medium faststart, aac 192k → 给 Render (M3.4/M3.5) 出片源",
-      "extract_audio: 从 hd 抽 -vn -ac 1 -ar 16000 -c:a pcm_s16le (16kHz mono WAV)",
-      "产物三件套: job_dir/normalized_low.mp4 + normalized_hd.mp4 + audio.wav (Video 实体新增 normalized_low_path/normalized_hd_path)",
-      "进度上报: 0.05 (probe) → 0.45 (normalize_low) → 0.85 (normalize_hd) → 0.95 (audio) → 1.0 (DONE)",
-      "Cancel 自检: 4 个 stage 之间各检查一次 is_cancelled()",
-      "handler 签名: run_ingest(job_dir, stage_name) → register_stage_handler(Stage.INGEST, run_ingest)",
-      "输入约定: job_dir/raw/<filename> 找用户上传原片 (handler 自动 glob 第一个视频)",
-      "磁盘成本: 1.5-2x 单轨; M3.8 cleanup 删 raw+low 保留 hd; 应急开关 INGEST_SINGLE_TRACK=1 (R18)",
-      "失败兜底: 任何异常都 mark FAILED 并抛出 (让父进程感知 exitcode); 已生成临时产物保留供 debug",
-      "原片向下兼容: 若原片 < 1080p, hd 按 min(原高, 1080); 若原片 < 720p, low 仍 720p (small upscale 可忽略)"
-    ],
-    "depends_on_completed": ["M1.4 (PipelineRunner + register_stage_handler)"],
-    "blocks": [
-      "M1.7 (Shot detector 需要 normalized_low.mp4)",
-      "M1.8 (Index stage 需要 audio.wav)",
-      "M3.4 (剪映 Exporter 需要 normalized_hd.mp4)",
-      "M3.5 (mp4 拼接 需要 normalized_hd.mp4)"
-    ],
-    "system_deps": ["ffmpeg 7.x (brew install ffmpeg verified 18:42)", "ffprobe (随 ffmpeg 一起)"]
+    "completed_at": "2026-05-04T21:30:00+08:00",
+    "commit": "7d15cc5",
+    "files_added": 7,
+    "lines_added": 1289,
+    "tests_net_added": 59,
+    "actual_days": 1.3
   },
   "infra_baseline": {
     "python_version": "3.13.3",
@@ -116,14 +113,18 @@
     {"sha": "71e5f07", "msg": "✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing", "files": 9, "lines": 1273},
     {"sha": "bef6b60", "msg": "📝docs: v0.4 adhoc - localize ASR + LLM-based character inference", "files": 4, "lines": 313},
     {"sha": "2747ef1", "msg": "🎨refactor: replace aliyun_asr settings with local whisper config (M1.5 prep)", "files": 4, "lines": 85},
-    {"sha": "444a3dc", "msg": "📝docs: initialize .context/ workspace tracking (v0.4.5 state)", "files": 5, "lines": 1126}
+    {"sha": "444a3dc", "msg": "📝docs: initialize .context/ workspace tracking (v0.4.5 state)", "files": 5, "lines": 1126},
+    {"sha": "56cf8e4", "msg": "📝docs: v0.5 adhoc - M1.6 Ingest dual-track normalize (low+hd)", "files": 4, "lines": 117},
+    {"sha": "cb2c32f", "msg": "📝docs: sync .context for Session 6 (M1.6 v0.5 adhoc dual-track normalize)", "files": 2, "lines": 178},
+    {"sha": "433c8b4", "msg": "🚧chore: R15 instance triage - HuggingFace network reset, 3-tier mitigation", "files": 3, "lines": 229},
+    {"sha": "7d15cc5", "msg": "✨feat: M1.6 Ingest stage - dual-track normalize + audio extract (ADR-010)", "files": 7, "lines": 1289}
   ],
   "test_status": {
-    "total_tests": 75,
-    "passed": 74,
-    "skipped": 1,
+    "total_tests": 137,
+    "passed": 133,
+    "skipped": 4,
     "failed": 0,
-    "execution_time_sec": 1.87,
+    "execution_time_sec": 2.40,
     "coverage_overall_pct": 96,
     "coverage_providers_asr_pct": 99,
     "new_in_m1_5": {
@@ -131,6 +132,13 @@
       "test_local_whisper_unit.py": 14,
       "test_local_whisper.py (integration)": 1,
       "_total_new": 27
+    },
+    "new_in_m1_6": {
+      "test_ffmpeg_utils.py": 32,
+      "test_ingest_handler.py": 27,
+      "test_ingest.py (integration, default skip)": 3,
+      "_total_new": 62,
+      "_net_added_after_dedup": 59
     }
   },
   "kpi_tracking": {
@@ -147,5 +155,5 @@
     "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-04T18:35:00+08:00"
+  "updated_at": "2026-05-04T21:31:00+08:00"
 }

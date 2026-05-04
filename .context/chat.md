@@ -428,3 +428,33 @@
 - M1.6 实现 batch 2: pipeline/ingest.py handler + 单元测试 (mock subprocess)
 - M1.6 实现 batch 3: integration test + 接到 PipelineRunner + commit
 - 用户并行：跑 test_whisper_realvideo.sh 验证 M1.5 实测
+
+---
+
+## Session 7 (2026-05-04 19:03 ~ 21:31) — R15 实例处置 + M1.6 完整闭环
+
+### 关键流程决策
+- **R15 实例触发处置**: huggingface.co Connection reset → 不卡 brainstorming, 直接代码加固 (脚本智能识别 + 三档兜底), 风险登记升级为部分缓解状态
+- **executing-plans skill 严格按 batch=3 推进**: Batch 1 (utils) → stop & report → 用户 GO → Batch 2 (handler) → stop & report → 用户 GO → Batch 3 (集成测试 + commit + worktree-save)
+- **handler 签名冲突解决**: M1.6 plan 文档写 `(job_dir, stage_name)` 但 runner.py 实际契约是 `(job_dir) -> None` → 以代码为准, 文档过时不阻塞实施
+- **测试隔离 bug 修复模式**: 模块级注册 + 后续测试 clear_stage_handlers() → 用 importlib.reload(ingest_mod) 在断言前重新触发注册 (避免改动 runner.py 现有契约)
+
+### 流程亮点
+- ✅ **batch=3 严格 stop & report**: 每批结束都用统一格式报告 (实施清单 + 验证全绿 + ADR 映射 + 下批预告 + 1 个待决策小问题)
+- ✅ **lint-as-code-review**: 每批末尾 ruff + read_lints + pytest (本批 + 全量回归) 三件套, 不全绿不进 commit
+- ✅ **用户授权"按你的方式"**: 默认决策 = loguru (与 local_whisper.py 一致) + skip-by-default 集成测试 (与 M1.5 一致), 强约定优于强讨论
+
+### Pitfall 记录
+- ❌ Batch 2 SIM117 4 处嵌套 with 没一次写对 → ruff --fix 没自动改完, 必须手动重写
+- ❌ Batch 2 test_handler_registered_on_import 单测过、全测挂 → 经典 module-level 副作用 + 测试污染问题, 先 grep clear_stage_handlers 定位元凶 test_runner.py L38/40, 再用 importlib.reload 修复
+- ❌ 多次 echo 中文导致 zsh `character not in range` → 后续 shell 命令一律 ASCII
+
+### Verification (Session 7 累计)
+- 3 个 commit: 433c8b4 (R15 缓解) + 7d15cc5 (M1.6 实现) + 待 commit (worktree-save 收尾)
+- 测试总数: 74 → 133 passed + 4 skipped (净增 +59 测试)
+- M1 进度: 5/8 → 6/8 (M1.6 ✅)
+
+### 下一步 (Session 8)
+- M1.7 PySceneDetect shot detector (0.5d, 依赖 M1.6 normalized_low.mp4) — algo/shot_detector.py + 单测
+- M1.8 Index stage handler (1d) — 集成 M1.5 ASR + M1.7 shot + 删 audio.wav (兑现 K9)
+- M1 milestone 端到端验收 (M1.8 完成后): curl POST /api/jobs 5min 短片 2min 内完成 ingest+index, shots.json + asr.json 产出

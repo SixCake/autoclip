@@ -583,3 +583,47 @@ User in pre-M1.5 phase:
 - M1.5 真机测试 (用户并行执行 scripts/test_whisper_realvideo.sh)
 - M1.6 实现 (executing-plans skill, batch=3): utils/ffmpeg.py + pipeline/ingest.py + tests
 - 系统依赖已验证: ffmpeg 7.1.1 ✅
+
+---
+
+## Session 7 — 2026-05-04 19:03 ~ 21:31
+
+### Trigger
+- 用户运行 `./scripts/test_whisper_realvideo.sh ~/Downloads/test.mp4` → `LocalEntryNotFoundError: ConnectError [Errno 54] Connection reset by peer` (R15 实例触发: huggingface.co 在用户网络下不通)
+- 用户回复"档位 1 已经跑通" + 授权"按你的方式进行决策"
+- 进入 M1.6 executing-plans skill batch 推进
+
+### Decisions
+- **R15 三档兜底落地** (commit 433c8b4):
+  - 档位 1: HF_ENDPOINT=https://hf-mirror.com (脚本默认 export, 用户实测可用)
+  - 档位 2: huggingface-cli download 命令行 (备选)
+  - 档位 3: curl 手动 + LocalWhisperProvider(model_size=本地路径) (终极离线兜底)
+- **M1.6 Batch 1**: utils/ffmpeg.py 4 函数 (probe_video + build_normalize_low/hd/extract_audio_cmd) + 32 单测
+- **M1.6 Batch 2**: pipeline/ingest.py run_ingest handler + runner.py _STAGE_MODULES 注册 + 27 单测
+  - 关键决策: 用 loguru (与 local_whisper.py 一致, 不用 logging)
+  - handler 签名以 runner.py 实际契约为准 (`(job_dir) -> None` 单参数, 文档中的 stage_name 参数过时)
+- **M1.6 Batch 3**: tests/integration/test_ingest.py 3 测 default skip (RUN_INTEGRATION=1 启用, 与 M1.5 集成测试约定一致)
+- **M1.6 commit 7d15cc5**: 7 files / +1289 / -1 (含 utils + ingest + runner + 3 个测试文件)
+
+### Files Modified
+- `scripts/test_whisper_realvideo.sh` — 第 2 参数智能识别模型名 OR 本地路径; 默认 export HF_ENDPOINT (commit 433c8b4)
+- `scripts/preload_whisper.py` — +argparse +--output-dir 参数 + 失败时打印 curl 兜底命令模板 (commit 433c8b4)
+- `docs/plans/2026-05-04-autoclip-plan.md` — R15 风险登记升级为三档联合策略 (commit 433c8b4)
+- `src/autoclip/utils/{__init__,ffmpeg}.py` — NEW (commit 7d15cc5)
+- `src/autoclip/pipeline/ingest.py` — NEW (commit 7d15cc5)
+- `src/autoclip/pipeline/runner.py` — _STAGE_MODULES 启用 ingest (commit 7d15cc5)
+- `tests/unit/test_ffmpeg_utils.py` — NEW 32 测 (commit 7d15cc5)
+- `tests/unit/test_ingest_handler.py` — NEW 27 测 (commit 7d15cc5)
+- `tests/integration/test_ingest.py` — NEW 3 测 default skip (commit 7d15cc5)
+
+### Verification
+- pytest 全量回归: 74 → 133 passed + 4 skipped (净增 +59 测试, +3 skipped)
+- ruff: All checks passed (修了 9 处 SIM117 + 2 处 I001 在两轮 batch 里)
+- read_lints: No lint errors found (utils + ingest + 3 测试文件)
+- test_handler_registered_on_import 测试隔离 bug: 因 test_runner.py clear_stage_handlers() 污染, 用 importlib.reload(ingest_mod) 修复
+- M1.6 集成测试 default skip 验证: 3 skipped, CI 不会跑
+
+### Next
+- M1.7 PySceneDetect shot detector (0.5d, 依赖 M1.6 normalized_low.mp4)
+- M1.8 Index stage handler (1d, 集成 M1.5 ASR + M1.7 shot, 删 audio.wav 兑现 K9)
+- M1 milestone 端到端验收 (M1.8 完成后): curl POST /api/jobs 5min 短片 2min 内完成 ingest+index
