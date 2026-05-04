@@ -195,24 +195,41 @@ def test_load_existing_shots_wrong_schema_returns_none(tmp_path: Path):
     assert _load_existing_shots(p) is None
 
 
-def test_load_existing_shots_propagates_oserror(tmp_path: Path):
+def test_load_existing_shots_propagates_oserror(tmp_path: Path, monkeypatch):
     """Real OS-level failures (PermissionError etc.) must NOT be swallowed.
 
     Silently treating a permission error as 'corrupt → re-detect' would
     let detect_shots run for ~30s only to hit the same OSError on the
     subsequent atomic write, hiding the real root cause from the operator.
+
+    Test robustness: we use monkeypatch (auto-teardown) and verify the
+    intercepted call is for OUR specific shots_path (not a stray Path I/O
+    happening elsewhere in _load_existing_shots), so the test fails loudly
+    if the helper is ever refactored to read additional paths.
     """
     p = tmp_path / SHOTS_FILENAME
     p.write_text("{}", encoding="utf-8")  # exists() must return True
 
-    # Simulate a transient I/O error mid-read (e.g. NFS hiccup, bad sector)
-    with (
-        patch.object(
-            Path, "read_text", side_effect=PermissionError("simulated denied")
-        ),
-        pytest.raises(PermissionError, match="simulated denied"),
-    ):
+    intercepted_paths: list[Path] = []
+    real_read_text = Path.read_text
+
+    def fake_read_text(self, *args, **kwargs):
+        intercepted_paths.append(Path(self))
+        if Path(self) == p:
+            raise PermissionError("simulated denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    with pytest.raises(PermissionError, match="simulated denied"):
         _load_existing_shots(p)
+
+    # Verify the helper actually attempted to read OUR target file
+    # (and didn't, say, swallow the error before reaching the read).
+    assert p in intercepted_paths, (
+        f"_load_existing_shots did not call read_text on {p}; "
+        f"intercepted={intercepted_paths}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +352,14 @@ def test_run_index_happy_path_full_flow(job_dir: Path):
 
 
 def test_run_index_progress_milestones(job_dir: Path):
-    """Verify mark_stage is called with the design-spec progress values."""
+    """Verify mark_stage is called with the design-spec progress values.
+
+    Note on missing initial 0.0: runner._stage_entrypoint calls
+    `mark_stage(stage, RUNNING, progress=0.0)` BEFORE invoking the handler,
+    so the handler itself must NOT re-mark RUNNING (would be a redundant
+    fsync write + would muddle ownership of the RUNNING transition).
+    The handler's first mark_stage call is therefore at progress=0.3.
+    """
     fake_provider = MagicMock()
     fake_provider.transcribe.return_value = _make_asr_result()
 
@@ -358,52 +382,58 @@ def test_run_index_progress_milestones(job_dir: Path):
     ):
         run_index(job_dir)
 
-    # 0.0 (initial RUNNING marker, per PipelineRunner contract),
     # 0.3 (post-shots), 0.95 (post-asr), then None for the final DONE
-    # (DONE doesn't pass progress; mark_stage auto-sets it to 1.0)
-    assert progress_seen == [0.0, 0.3, 0.95, None]
+    # (DONE doesn't pass progress; mark_stage auto-sets it to 1.0).
+    # NO initial 0.0 — that's the runner._stage_entrypoint's job, not ours.
+    assert progress_seen == [0.3, 0.95, None]
     assert statuses_seen == [
-        StageStatus.RUNNING,
         StageStatus.RUNNING,
         StageStatus.RUNNING,
         StageStatus.DONE,
     ]
 
 
-def test_run_index_marks_running_before_shot_detection(job_dir: Path):
-    """RUNNING must be set BEFORE detect_shots runs so `started_at` gets stamped.
+def test_handler_does_not_redundantly_mark_running(job_dir: Path):
+    """Handler must NOT call mark_stage(RUNNING) — runner._stage_entrypoint owns that.
 
-    state.py::mark_stage only sets started_at on the first RUNNING transition.
-    Without an explicit pre-detection mark, the slot would stay PENDING for
-    ~30s while shot detection runs, breaking progress polling and timing.
+    Contract: runner._stage_entrypoint calls
+        state.mark_stage(stage, RUNNING, progress=0.0)
+    BEFORE invoking handler(job_dir). Re-marking RUNNING in the handler
+    would (a) issue a redundant atomic write+fsync per state.py::_save_atomic,
+    (b) duplicate ownership of the RUNNING transition between handler+runner,
+    and (c) reset progress to 0.0 if the runner ever advances it before
+    handing off (forward-compat hazard).
+
+    We assert this by spying on every mark_stage(INDEX, ...) call from the
+    handler and verifying NONE of them have status==RUNNING with progress==0.0
+    (which is the entrypoint's signature call).
     """
     fake_provider = MagicMock()
     fake_provider.transcribe.return_value = _make_asr_result()
 
-    captured_status_at_detect: dict[str, str | None] = {"status": None, "started_at": None}
+    handler_calls: list[tuple[StageStatus, float | None]] = []
+    real_mark = JobStateFile(job_dir).mark_stage
 
-    def detect_capture(_video_path):
-        # Snapshot the INDEX slot at the moment detect_shots is invoked
-        snap = JobStateFile(job_dir).load()["stages"][Stage.INDEX.value]
-        captured_status_at_detect["status"] = snap["status"]
-        captured_status_at_detect["started_at"] = snap["started_at"]
-        return _make_shots(2)
+    def spy(stage, status, progress=None, error=None):
+        if stage == Stage.INDEX:
+            handler_calls.append((status, progress))
+        return real_mark(stage, status, progress=progress, error=error)
 
     with (
-        patch("autoclip.pipeline.index.detect_shots", side_effect=detect_capture),
+        patch("autoclip.pipeline.index.detect_shots", return_value=_make_shots(2)),
         patch("autoclip.pipeline.index._build_asr_provider", return_value=fake_provider),
+        patch.object(JobStateFile, "mark_stage", side_effect=spy, autospec=False),
     ):
         run_index(job_dir)
 
-    # At detect_shots invocation, slot must already be RUNNING + timestamped
-    assert captured_status_at_detect["status"] == StageStatus.RUNNING.value
-    assert captured_status_at_detect["started_at"] is not None
-
-    # And the post-run state has started_at preserved + finished_at set
-    final = JobStateFile(job_dir).load()["stages"][Stage.INDEX.value]
-    assert final["started_at"] is not None
-    assert final["finished_at"] is not None
-    assert final["status"] == StageStatus.DONE.value
+    # Critical: no (RUNNING, 0.0) duplicate of the entrypoint's call
+    assert (StageStatus.RUNNING, 0.0) not in handler_calls, (
+        f"handler illegally re-marked RUNNING at progress=0.0; calls={handler_calls}"
+    )
+    # Sanity: handler still made its expected progress + DONE calls
+    assert (StageStatus.RUNNING, 0.3) in handler_calls
+    assert (StageStatus.RUNNING, 0.95) in handler_calls
+    assert (StageStatus.DONE, None) in handler_calls
 
 
 # ---------------------------------------------------------------------------

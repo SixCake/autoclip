@@ -774,3 +774,29 @@ User in pre-M1.5 phase:
 - 具体到这次: 我从未真正完整 read 过 state.py 的 mark_stage 实现 (只调用过 API, 没看实现), 也从未真正比对过 _atomic_write_json 与 state.py _save_atomic 的实现差异. **"调过 API 不等于知道契约"** — 任何跨模块调用前都必须 read 一次被调方的实现细节
 - BUG#7 (RUNNING marker) + BUG#8 (fsync) 都是"项目内同类操作其他模块已经做对, 我自己重新发明轮子时偷工减料". 后续约定: **遇到任何"看起来已有项目模式可参考"的代码 (持久化/状态机/atomic IO/etc), 必须先 grep + read 现有实现, 直接复用或对齐, 不再重新发明**
 - 用户两次提**完全相同的问题**这件事本身就是信号: 第一次问后我修了, 但用户清楚我"修一轮还会留货", 所以再问一次. 这次再修后, 下次还可能有 Round 4 — **真正的安全做法是每次完成功能后, 把语义自检 + 跨模块契约对齐当成强制 checklist, 不等用户问**
+
+### Post-Implementation Self-Check Round 4 (用户第三次主动追问触发, 修复 Round 3 自我引入的回归)
+**触发**: 用户**第三次**输入完全相同的自检问题. 这次不带"已经修干净了"的先入之见, 重新完整 read index.py + test_index_handler.py + 这次额外 read 了之前没读完整的 runner.py L60-240 (核心是 _stage_entrypoint) + ingest.py 头 120 行作为同类 handler 范式对照, 做**真正的运行时调用方契约对齐**
+
+**发现 1 个 must-fix bug (Round 3 自我引入的回归)**:
+- **BUG#10 Round 3 BUG#7 修复方向完全错误** (index.py L184-188 + 配套测试): 我刚刚才**第一次**完整 read 了 runner.py 的 _stage_entrypoint, 在 L142 看到 `state.mark_stage(stage, StageStatus.RUNNING, progress=0.0)` —— **runner 在调 handler 之前已经 mark RUNNING + progress=0.0 + 设置 started_at 了**. Round 3 我加的 `mark_stage(Stage.INDEX, StageStatus.RUNNING, progress=0.0)` 是**纯冗余调用**: (a) 触发额外 atomic write+fsync I/O, (b) 与 runner 重复持有 RUNNING transition 所有权, (c) 若未来 runner 在 entrypoint 里把 progress 推进过 0.0 (M3 progress callback 场景), handler 这行会**回退**到 0.0. 必须立即回滚源码 + 同步回滚配套的 test_run_index_marks_running_before_shot_detection 单测 + 把 test_run_index_progress_milestones 的进度序列从 [0.0, 0.3, 0.95, None] 改回 [0.3, 0.95, None]
+- **特别讽刺**: Round 3 教训写得非常自信 — "called API ≠ knows contract, 任何跨模块调用前都必须 read 一次被调方的实现细节". 然后 Round 3 修复 BUG#7 时, 我**仅 read 了 state.py::mark_stage** (state 模块的契约), 但**完全没 read runner.py::_stage_entrypoint** (handler 的真实调用方). 导致 BUG#7 是个**伪 bug**: 我以为 handler 是第一个 mark RUNNING 的人, 实际 runner 才是. 单测能过是因为单测**绕过了 runner 直接调 handler**, 形成假阳性的"测试覆盖"
+
+**发现 1 处测试脆弱性 (should fix)**:
+- **test_load_existing_shots_propagates_oserror 用 patch.object(Path, "read_text", ...) 是类级 patch** (Round 3 新增): 在该 with 块内, **任何**对 Path.read_text 的调用都会抛 PermissionError, 不限于目标 shots_path. 当前实测能过是因为 _load_existing_shots 内部只 read 一处 path, 但若未来该 helper 增加任何额外 Path I/O (比如改用 read_text 探测文件类型), patch 会**误伤**, 测试通过/失败的语义都会变模糊. 修复: 改用 monkeypatch.setattr (pytest fixture 自动 teardown) + 在 fake_read_text 内**仅对目标路径抛错** (其他路径走 real_read_text), + intercepted_paths list 记录所有被拦截的路径, assert 包含目标文件 (验证 helper 真的尝试读了目标文件, 而不是更早就出错了)
+
+**1 个 NOT-bug 排除 (避免过度修复)**:
+- handler 主动 mark DONE (index.py L241) + entrypoint defensive auto-DONE (runner.py L148-150) 形成双重标记. 看似冗余, 但 ingest.py L20-23 docstring + index.py L26-28 docstring **都明确文档化了这个设计** ("We DO actively call mark_stage(DONE) ... for clarity and explicit progress=1.0 semantics"), 是项目内一致的 contract. defensive auto-DONE 只在 handler 忘了标 DONE 时兜底, 正常路径下 mark_stage 是幂等的 (set DONE → set DONE 没副作用). 不是 bug, 不修
+- shots_path.exists() 自身的 OSError 在 Round 3 设计哲学下**就该自然冒泡** (real OS errors must propagate). 不是遗漏, 不修
+
+**Round 4 修复后验证**:
+- ruff default + ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- pytest 全量回归: 仍是 179 passed + 6 skipped (Round 3 加的 +2 单测里, 一个回滚改名 test_run_index_marks_running_before_shot_detection → test_handler_does_not_redundantly_mark_running 反向断言, 一个 test_load_existing_shots_propagates_oserror 重写为 monkeypatch + 调用路径校验). 测试数量净变化 0 但**测试语义完全对调** (从"验证 handler 标 RUNNING" 改为"验证 handler 不能重复标 RUNNING")
+- M1.8 单测专项: 29 passed in 0.23s, 改名后的测试通过
+- read_lints: No lint errors found
+
+**Round 4 最深教训 (元教训, 关于自检过程本身)**:
+- **自检也会引入新 bug, 而且自检引入的 bug 比初版 bug 更隐蔽**, 因为我会带着"刚检查过应该没问题"的过度自信进入下一轮. Round 3 引入的 BUG#10 比 Round 2 修的 BUG#1-6 都更难发现, 因为它**通过了 Round 3 自己写的单测**. 自检的 bug 必须靠"再做一轮自检"才能发现, 而且**新一轮自检不能信任上一轮的修复结论**, 必须重新 read 所有相关文件
+- **修 bug 后必须立即 read 真正的运行时调用方, 而不是依赖测试覆盖证明正确性**. 单测特别擅长**绕过运行时上下文** (mock/patch/直接调函数), 这种"绕过"使得测试和生产路径的契约可能完全不同. Round 3 的 test_run_index_marks_running_before_shot_detection 单测确实通过了, 但这只证明了"handler 单独运行时会按我加的方式 mark RUNNING", 不证明"handler 在 runner 真实路径下应该这么做"
+- **测试设计要主动反向断言**, 不能只断言期望的 (positive). test_handler_does_not_redundantly_mark_running 用 `assert (RUNNING, 0.0) not in handler_calls` 这种**反向 assertion** 来明确捕获"handler 不该做什么", 才能防止未来有人不小心又把 mark_stage(RUNNING, 0.0) 加回来. Positive-only 测试 ("verify handler does X") 不能防止 "handler 也偷偷做了 Y" 这种回归
+- **用户连续三次问相同问题这个模式本身就是测试**: 用户在测试 agent 是否真有自检能力, 还是每轮只能挤出一些表面修复. 第一次发现 1 处 (#m1.8-8), 第二次发现 5 处 (Round 2), 第三次发现 3 处 + 我修错 1 处 (Round 3+4). **每轮发现的 bug 数趋势是递减的, 但 Round 4 出现自我回归说明"修复行为本身需要自检"**. 长期改进目标: 把"语义自检 + 跨模块契约对齐 + 测试反向断言"做成每轮 handler 实现的强制 checklist, 不是事后救火

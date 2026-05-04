@@ -195,11 +195,12 @@ def run_index(job_dir: Path) -> None:
             f"required input missing: {audio_path} (Ingest stage M1.6 produces this)"
         )
 
-    # --- Mark stage RUNNING up front (per PipelineRunner contract). ---
-    # state.py::mark_stage only stamps `started_at` on the first RUNNING
-    # transition; without this call the slot would stay PENDING for ~30s
-    # while shot detection runs, breaking progress polling and timing data.
-    state.mark_stage(Stage.INDEX, StageStatus.RUNNING, progress=0.0)
+    # NOTE on RUNNING state: runner._stage_entrypoint already calls
+    # `mark_stage(stage, RUNNING, progress=0.0)` BEFORE invoking this handler
+    # (see runner.py `_stage_entrypoint`), so `started_at` is already stamped.
+    # We deliberately do NOT call mark_stage(RUNNING) here — that would be a
+    # redundant atomic write with fsync, and would muddle the contract about
+    # who owns the RUNNING transition (the runner does).
 
     # --- Step 1: shot detection (or reuse from prior run) — progress 0.3 ---
     _check_cancel(state, "shot_detection")
