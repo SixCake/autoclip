@@ -70,9 +70,10 @@
     "lines_added": 847,
     "lines_deleted": 1,
     "tests_net_added": 33,
-    "tests_net_added_breakdown": "31 unit (test_index_handler.py) + 2 integration (test_index.py, default-skip)",
+    "tests_net_added_breakdown": "31 unit (test_index_handler.py) + 2 integration (test_index.py, default-skip); historical: Round 0 commit ed0e0ff wrote 27 unit, 6 self-check rounds added +4 unit (Round 4 reverse-assertion +1, Round 5 +1, Round 6 +2)",
     "integration_tests_added": 2,
     "actual_days": 0.8,
+    "actual_days_breakdown": "0.6 main implementation (Session 9 startup, recorded in chat.md L499 Session 9 title + ed0e0ff state.json) + 0.2 for 6 self-check rounds (Rounds 1-6, chat.md L499 vs L548 differ by this 0.2 — both correct in their own scope)",
     "key_implementation_notes": [
       "naming: IndexStageError + IndexStageCancelledError (avoid Python builtin IndexError name collision in stack traces)",
       "_build_asr_provider() seam: Settings-driven LocalWhisperProvider construction; module-level so unit tests monkeypatch it instead of patching faster_whisper",

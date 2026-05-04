@@ -545,7 +545,9 @@
 - `runner.py:48-50` StageHandler Protocol docstring 说 "Handler must mark its own RUNNING and DONE/FAILED" 但 `_stage_entrypoint:142` 已经替 handler 标了 RUNNING. 这是 M1.4 历史 contract bug, 直接导致 Round 3 BUG#7. 必须在 M2a 之前修, 否则下一个 handler 作者读 docstring 会重蹈覆辙
 
 ### M1 总结 (整个 milestone 跨 9 个 session)
-- 总工时实际 6.5d vs 估算 6.8d, **提前 ~4%** (分解: M1.1 0.5 + M1.2 1.0 + M1.3 0.5 + M1.4 1.5 + M1.5 0.5 + M1.6 1.3 + M1.7 0.4 + M1.8 0.8 含 6 轮 self-check 多花 0.2d). 注: changes.md L701 老分解写的 "5.4d" 自身算术有误 (8 项相加 = 6.3d, M1.8 也只算了 0.6d 没含 self-check 的 0.2d), Round 7 self-check 已校正
+- 总工时实际 6.5d vs 估算 6.8d, **提前 ~4%** (分解: M1.1 0.5 + M1.2 1.0 + M1.3 0.5 + M1.4 1.5 + M1.5 0.5 + M1.6 1.3 + M1.7 0.4 + M1.8 0.8 含 6 轮 self-check 多花 0.2d).
+- **M1.8 工时口径说明 (Round 8 self-check 补)**: 本节 M1.8=0.8d 与 L499 Session 9 标题 "M1.8 单 batch 闭环 (0.6d 实际)" 不矛盾 — L499 是 Round 0 (Session 9 启动 commit ed0e0ff) 写的**主体实现工时**, 本节 0.8d = 0.6 主体 + 0.2 后续 6 轮 self-check (Round 1-6, fe38cbf→1285acd 共 5 commits). state.json `previous_task.actual_days_breakdown` 字段也保留了同样说明
+- 注: changes.md L701 老分解写的 "5.4d" 自身算术有误 (8 项相加 = 6.3d, M1.8 也只算了 0.6d 没含 self-check 的 0.2d), Round 7 self-check 已校正
 - 测试积累: 0 → 187 (181 passed + 6 skipped 集成默认 skip)
 - 5 个核心模块全部交付: state machine (M1.3) / runner (M1.4) / ASR provider (M1.5) / Ingest stage (M1.6) / Shot detector (M1.7) / Index stage (M1.8)
 - KPI 兑现: K7 (5-stage pipeline 跑通) ✅ / K8 (shot 检测 + Whisper ASR 集成) ✅ / K9 (audio.wav 在 Index DONE 后必删, atomic 化设计) ✅
