@@ -31,35 +31,42 @@
 
 **目标**: 实现"给定 evidence_keywords + ASR sentences → 计算每个 ASR 句子的匹配得分"的算法，作为 time_resolver 的底层能力。
 
-**关键设计决策**（**core, design.md §16.3**）:
-- **算法选择**: MVP 用**字符级 Jaccard + IDF 加权**（不上 BM25，避免引入 sklearn / rank_bm25 依赖）
-  - 备选：如果效果差，升级到 rank_bm25（可在 P1 风险出现时切换）
+**关键设计决策**（**core, design.md §16.3；adhoc plan-3 选型修订 2026-05-04**）:
+- **算法选择**：MVP 直接采用 **rank_bm25**（`rank_bm25.BM25Okapi`），不再走原 plan 的字符级 Jaccard + IDF 简化路径
+  - **决策依据**：原 plan 评估 K2 ≥ 80% 风险时，子串匹配在"电话/手机"、"喂/你好"等近义词召回上偏弱；rank_bm25 是纯 Python 单文件实现（无 C 扩展依赖、无 sklearn），引入成本极低，但比手撸 Jaccard 在短查询多关键词场景上稳定性高一个量级
+  - **依赖声明**：`pyproject.toml` 追加 `rank-bm25 = "^0.2.2"`（与 M2a.1 dashscope/tenacity/pydantic 同 commit 提交，避免分散）
+  - 兜底：如 BM25 在中文短查询（2-4 字 keywords）上效果反而退化，可加 `unicodedata` 归一化 + 字符 n-gram tokenizer 二次包装（不切换算法本身）
 - **接口签名**:
   ```
-  keyword_match_score(asr_text: str, keywords: list[str], idf_table: dict[str, float] | None = None) -> float
+  keyword_match_score(
+      asr_text: str,
+      keywords: list[str],
+      bm25_index: BM25Okapi | None = None,  # None 表示一次性 ad-hoc 计算
+  ) -> float
   ```
-  - 返回 [0.0, 1.0] 归一化得分
+  - 返回 [0.0, 1.0] 归一化得分（BM25 raw score 经 `min(score / max_score_in_corpus, 1.0)` 归一）
   - keywords 全部命中 → 接近 1.0；零命中 → 0.0
-- **IDF 表**: 由整段 ASR 构建（每个 ASR 句子作为一篇"文档"），降低高频虚词（"的"/"了"/"啊"等）权重
-  - 缓存到 `data/{job_id}/asr_idf.json` 避免重复计算
-- **关键词归一化**: 全部转小写 + 去除标点 + Unicode 兼容（`unicodedata.normalize('NFKC')`）
-- **匹配模式**: 子串匹配（不做分词，避免 jieba 等额外依赖；中文场景子串足够）
-- **阈值常量**: `THRESHOLD_MATCH_SCORE = 0.3`（M2b.4 调优）
+- **BM25 语料构建**：把整段 ASR 的每个句子作为一篇"文档"，预先 build `BM25Okapi(tokenized_corpus)` 一次复用
+  - tokenizer：中文场景用**字符级 split**（不引 jieba，与 BM25 配合即可达到 evidence_keywords 召回需求）
+  - 缓存到 `data/{job_id}/asr_bm25_index.pkl`（pickle 序列化 BM25Okapi 实例）避免重复计算
+- **关键词归一化**：全部转小写 + 去除标点 + Unicode 兼容（`unicodedata.normalize('NFKC')`）
+- **阈值常量**: `THRESHOLD_MATCH_SCORE = 0.3`（M2b.4 调优；BM25 归一化后阈值意义与 Jaccard 一致）
 
 **涉及文件**:
+- Modify: `pyproject.toml`（追加 `rank-bm25 = "^0.2.2"`，可与 M2a.1 同 commit 一起 install）
 - Create: `src/autoclip/algo/keyword_match.py`
 - Create: `tests/unit/test_keyword_match.py`
 
 **测试策略**:
-- 单元: 全命中得分接近 1.0 / 零命中 = 0.0 / IDF 加权降低虚词权重 / 大小写不敏感 / 标点不敏感
+- 单元: 全命中得分接近 1.0 / 零命中 = 0.0 / BM25 长文档惩罚降低虚词权重 / 大小写不敏感 / 标点不敏感 / pickle 缓存往返一致
 
 **验收标准**:
-- [ ] 5+ 用例覆盖核心场景
-- [ ] 对 100 个真实 ASR 样本，function 调用 < 100ms
+- [ ] 5+ 用例覆盖核心场景（含 1 个 pickle 缓存往返用例）
+- [ ] 对 100 个真实 ASR 样本，function 调用 < 100ms（含 BM25 index 命中缓存路径）
 
 **关联 KPI**: K2（评分函数是召回的基础） / K8
 **依赖**: M2a.3（NarrativeSentence.evidence_keywords） → **阻塞**: M2b.2
-**预估工时**: 1d
+**预估工时**: 1.2d（原 1.0d；adhoc plan-3 选型升级 +0.2d 用于 BM25 集成 + pickle 缓存测试）
 
 ---
 
@@ -255,12 +262,12 @@
 ## M2b 总工时估算
 | 任务 | 工时 |
 |---|---|
-| M2b.1 keyword_match | 1.0d |
+| M2b.1 keyword_match (BM25) | 1.2d（adhoc 升级 +0.2d）|
 | M2b.2 time_resolver | 1.5d |
 | M2b.3 升级版 Binder | 1.0d |
 | M2b.4 KPI 评估脚本 | 1.0d |
 | M2b.5 Prompt v2 + 验收 | 1.5d |
-| **总计** | **6.0d**（控制在 W3 内，含调优迭代）|
+| **总计** | **6.2d**（W3 5 工作日 + 0.8d buffer 占用 0.2d；剩余 0.6d 用于 prompt 调优迭代）|
 
 ## M2b 完成时的 PR 描述模板
 ```

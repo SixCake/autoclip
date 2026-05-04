@@ -31,9 +31,10 @@ docs/plans/
 
 | Milestone | 周 | 任务数 | 详细文档 | 状态 | 完成 % |
 |---|---|---|---|---|---|
-| **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | ✅ 已完成 | 8/8 (M1.1-M1.8 ✅; milestone 完成, 待 e2e 验收) |
-| **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | ⏳ 待开始 | 0/6 |
-| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 5 | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始 | 0/5 |
+| **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | ✅ 已完成 | 8/8 (M1.1-M1.8 ✅; 含 10 轮 self-check sealed via LIM#9 + LIM#8 FIXED in M2a-kickoff cleanup) |
+| **M1-e2e** — M1 milestone 人工 e2e 验收 | W1↔W2 衔接 | 1 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) §M1.8 验收标准 | ⚪ 已跳过（用户决策直接进 M2a） | 0.2d 人工任务（uvicorn + curl POST /api/jobs；M1 已 185 单元/集成测试覆盖足够） |
+| **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | 🟡 brainstorming 中 | 0/6 |
+| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 5 | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始 | 0/5（总工时 6.0d→6.2d，adhoc plan-3 BM25 升级）|
 | **M3** — Render + Web + 零知识架构 | W4 | 9 | [`tasks/M3-render-web-compliance.md`](./tasks/M3-render-web-compliance.md) | ⏳ 待开始 | 0/9 |
 | **M4** — E2E + 风格扩展 + 多片回归 | W5 | 5 | [`tasks/M4-e2e-validation.md`](./tasks/M4-e2e-validation.md) | ⏳ 待开始 | 0/5 |
 | Week 6 — Buffer | W6 | — | — | ⏳ 待开始 | — |
@@ -225,4 +226,5 @@ autoclip/
 | 2026-05-04 | v0.1 | 初始总控文档创建（替代旧的 3847 行实现代码版） |
 | 2026-05-04 | v0.2 | adhoc：ASR 改本地 faster-whisper + large-v3（design.md Part IV §21）；MVP 加 LLM 推断角色（§22 ADR-009）；M1.5 工期 1d→0.5d；总工期 -0.5d；R2 解除，新增 R15/R16/R17 |
 | 2026-05-04 | v0.3 | adhoc：M1.6 Ingest 改**双轨 normalize**（normalized_low.mp4 给检测 + normalized_hd.mp4 给出片，design.md Part IV §24 ADR-010）；M1.6 工期 1.0d→1.3d；M1 总工期 6.5d→6.8d，全工期 31.5d→31.8d；新增 R18（双轨磁盘成本 2x） |
+| 2026-05-04 | v0.4 | M1 milestone 收尾 + M2a kickoff adhoc plan sync（commit b5af64e 起 8 处改动）：① M1.6 双轨 normalize 已实际落地（commit 7a74d10 主实现）；② M1.8 Index handler 完成（10 轮 self-check 通过 LIM#9 HARD STOP sealed at commit 41471ad；181→185 pytest passed）；③ tech_debt 新增 LIM#9（self-check 无限套娃防御）+ LIM#8 已 FIXED（commit b5af64e: runner.py StageHandler Protocol docstring 重写 + 4 反向断言测试）+ LIM#10 NEW（test_runner.py 单跑 isolation bug，pre-existing M1.4 问题，deferred）；④ M2a.5 BindingMethod enum 补 EVIDENCE_LOWCONFIDENCE 预留枚举值；⑤ M2a.6 Scripting 时长预算据 K6 总预算结构修正 4min/90min→2.5min/90min；⑥ M2a.6 style_preset 改用环境变量 AUTOCLIP_STYLE_PRESET 注入，state.json schema 改造推迟 M2b.5；⑦ M2a.1 加 pyproject.toml 依赖声明（dashscope^1.20 + tenacity^9.0 + pydantic^2.0）；⑧ M2b.1 keyword_match 算法选型 字符 Jaccard → rank_bm25，工时 1.0d→1.2d，M2b 总工时 6.0d→6.2d（W3 buffer 占用 0.2d，剩余 0.6d）|
 

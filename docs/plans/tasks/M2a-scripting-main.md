@@ -42,8 +42,14 @@
   - 支持 JSON mode：`response_format={"type":"json_object"}`
   - tenacity retry 3 次（指数退避，min=2s max=20s），仅对 RuntimeError 重试
   - 失败抛 `RuntimeError(f"Qwen API failed: code={code} msg={msg}")`
+- **依赖声明**（**G1, 2026-05-04 adhoc 补充**）：M2a 启动第一步必须先在 `pyproject.toml` 的 `[tool.poetry.dependencies]` 段追加：
+  - `dashscope = "^1.20"`（通义千问 SDK，QwenProvider 直接依赖）
+  - `tenacity = "^9.0"`（HTTP 层 retry 装饰器，QwenProvider + M2a.4 retry_with_repair 共用）
+  - `pydantic = "^2.0"`（M2a.2 `_PlotOutlineRaw` Pydantic 校验层，与 pydantic-settings 1.x 共存）
+  - 完成后跑 `poetry lock --no-update && poetry install` 锁版本，并提交 `pyproject.toml` + `poetry.lock` 一起 commit（避免后续 task 因依赖缺失返工）
 
 **涉及文件**:
+- Modify: `pyproject.toml`（依赖声明 + `poetry.lock` 同步）
 - Create: `src/autoclip/providers/llm/{__init__,base,qwen}.py`
 - Create: `tests/unit/test_llm_base.py`
 - Create: `tests/integration/test_qwen_provider.py`（默认 skip，需 `RUN_INTEGRATION=1`）
@@ -211,6 +217,11 @@
   4. 单段最小时长保障：< min_segment_sec 时扩展（不超出段落边界）
   5. shot 匹配：与 [seg_start, seg_end] 重叠的 shot ids 全部纳入
   6. 极端 fallback：找不到重叠 shot → 取 start_sec 最近的 shot
+- **`BindingMethod` enum 完整成员**（**adhoc plan-1 补充**）:
+  - `HINT_UNIFORM` — M2a baseline，按 paragraph_hint 均分，本 task 唯一会写入的值
+  - `EVIDENCE` — M2b post-validation 命中且 confidence 高（M2b.2 写入）
+  - `EVIDENCE_LOWCONFIDENCE` — M2b post-validation 命中但 top_k 平均得分 < 0.5（M2b.2 写入；本枚举值在 M2a.5 预留是为了 M2b.2 升级时不需要二次扩 enum，避免 timeline.json 跨版本兼容性踩坑）
+  - `FALLBACK_UNIFORM` — M2b resolve 返回 None 时回退到 paragraph 均分（M2b.3 写入）
 - **不做的事**（留给 M2b）:
   - 不用 evidence_keywords 反向检索
   - 不做 BM25 / 字符级匹配
@@ -262,14 +273,16 @@
   3. parse 失败 → try_repair_json → 重 parse；仍失败抛 ValueError → retry_with_repair 再试
 - **进度上报**: 0.05 / 0.3 (plot done) / 0.7 (IR done) / 0.9 (bind done) / 1.0
 - **Cancel 检查点**: 在每次 LLM 调用前
-- **`JobStateFile.init` 改造**: 接受新参数 `style_preset: str = "plot_summary"`（写入 state.json，scripting handler 读取）
+- **style_preset 注入方式**（**adhoc plan-4 决策**）：M2a.6 **不改 `JobStateFile.init` schema**（避免 M1 baseline 漂移）。改用环境变量 `AUTOCLIP_STYLE_PRESET=plot_summary`（默认值）由 scripting handler 启动时直接 `os.environ.get(...)` 读取。state.json schema 改造推迟到 **M2b.5**（届时已经有 binder_version 字段升级，可一并做 schema bump，集中迁移成本）。
+  - **设计 rationale**：M1 e2e 验收完成前任何 state schema 变动都会让"M1 收工"成为浮动目标；环境变量是零侵入的兜底通道，M2b.5 schema 升级时 M2a 的 env 入口可保留作为 debug fallback。
+- **LIM#10 提醒**（**adhoc G2 补充, 2026-05-04 .context tech_debt**）：实现 scripting handler 后若**单跑** `pytest tests/unit/test_runner.py` 出现 `IngestError: raw directory missing` 是已知问题（LIM#10：`_stage_entrypoint` 内部调 `_load_stage_modules()` 重新 import 真 handler 覆盖 lambda），跑全量 `pytest tests/` 即 pass。本 task 不修 LIM#10，遗留到 M2a 收尾或首位踩坑开发者修复。
 
 **涉及文件**:
 - Create: `src/autoclip/pipeline/scripting.py`
 - Modify: `src/autoclip/pipeline/__init__.py`（追加 `from . import scripting`）
-- Modify: `src/autoclip/pipeline/state.py`（init 增加 style_preset 字段）
-- Modify: `src/autoclip/api/jobs.py`（POST /api/jobs 把 style_preset 传给 state.init）
-- Create: `tests/integration/test_scripting_e2e.py`（mock LLMProvider）
+- ~~Modify: `src/autoclip/pipeline/state.py`（init 增加 style_preset 字段）~~ **删除（推迟 M2b.5）**
+- ~~Modify: `src/autoclip/api/jobs.py`（POST /api/jobs 把 style_preset 传给 state.init）~~ **删除（推迟 M2b.5）**
+- Create: `tests/integration/test_scripting_e2e.py`（mock LLMProvider + monkeypatch `AUTOCLIP_STYLE_PRESET`）
 
 **测试策略**:
 - 集成（mock LLM）: patch QwenProvider 返回固定 JSON，验证 timeline.json 结构正确 + state DONE
@@ -278,7 +291,9 @@
 **验收标准**:
 - [ ] mock 集成测试通过
 - [ ] **Milestone 端到端验收**: 短片完整流水线 ingest+index+script 跑通，肉眼检查匹配 ≥ 50%
-- [ ] Scripting stage ≤ 4min/90min 视频（K6 部分目标）
+- [ ] Scripting stage ≤ 2.5min/90min 视频（K6 部分目标 — 详见下方 K6 预算说明）
+
+> **K6 总预算占比说明**（**adhoc plan-2 修正**）：design.md §7.2 K6 总预算 ≤ **16min/90min**（5 个 stage 合计）。M1 实测 large-v3 在 90min 视频上的 ASR ≈ **9-10min**（Index 段大头），ingest 双轨 normalize ≈ **1.5min**，留给 Scripting 实际只有 **2.5-3min**。原 plan 写"≤ 4min/90min"是对总预算结构未消化的过乐观估计，本次 adhoc 据实修正为 **≤ 2.5min/90min**。Assembly + Render 余下 ~3min（M3.4 验收）。
 
 **关联 KPI**: K6（端到端耗时） / K8
 **依赖**: M2a.1 + M2a.2 + M2a.3 + M2a.4 + M2a.5 → **阻塞**: M2b 全部
