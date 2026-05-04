@@ -847,3 +847,29 @@ User in pre-M1.5 phase:
 - **"对称性破坏"是潜在的可观测性 bug 信号**: shots 空→raise vs sentences 空→静默, 这种**类似输入的不对称处理**在源码 review 时很难看出来 (单独看每行都合理), 但在跨模块 contract 视角下很显眼. 后续约定: 当一个 handler 处理多类相似输入时, 必须主动审视"我对它们的处理策略是否对称, 不对称的差异有没有文档化"
 - **测试反向断言扩展**: Round 4 我学到"测试要主动反向断言". Round 6 进一步实践: 给 empty-ASR warning 同时加了 (a) 正向断言 `any("ASR produced 0 sentences" in m for m in captured)` (b) 反向断言 `not any(... in m for m in captured)` 的姊妹测试. 这种"正反双单测"模式比单一断言更能防止"if 条件被误改宽"的回归
 - **每轮自检 bug 数: 1→5→3+1regression→1+1LIM→2 should-fix**. Round 6 比 Round 5 略增 (1→2), 因为这轮扩展了 scope 到被依赖模块. **bug 数趋势不是单调下降**, 一旦扩展 scope 就会再发现一批. 真正的收敛信号是**"扩展 scope 后仍然找不到 must-fix"**, 当前还没到那个点 (Round 6 找到的是 should-fix 注释/可观测性, 不是功能 bug, 比 Round 1-3 的 must-fix 量级低)
+
+### Session 9 Final Summary (worktree-save 会话结束门禁)
+**Session 9 全景** (M1.8 主实现 + 6 轮 self-check 完整闭环):
+- 主实现 commit 7a74d10 (M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup K9, 27 tests)
+- worktree-save 修正 commits ed0e0ff (amend) + faad1df (state.json git_log[-1] 修正)
+- Round 1 self-check 仅记录 commit 936f217 (keyword grep, 错过所有语义 bug)
+- 5 轮代码修复 commits: fe38cbf (Round 2, 5 must-fix) → ba03849 (Round 3, 3 contract bugs) → 0b83337 (Round 4, 1 self-regression revert) → 08a664a (Round 5, dead code + LIM#8) → 1285acd (Round 6, 2 should-fix + 2 reverse-assertion tests)
+- **HEAD: 1285acd** | 共 8 个 commits | M1.8 净增 31 单测 + 2 集成测试
+
+**最终验证终态**:
+- pytest: 181 passed + 6 skipped (M1.8 净增: test_index_handler.py 31 单测 + test_index.py 2 集成默认 skip)
+- ruff default: All checks passed!
+- ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- read_lints: No lint errors found
+- git working tree: [CLEAN]
+
+**遗留 LIM 留给后续 milestone**:
+- **LIM#3** (M2a): shots.json 跨 shot schema 校验弱 (idx 不连续 / 时间重叠等不会被 _load_existing_shots 检测), M2a scripting 拿到 shots 后做严格校验
+- **LIM#6** (M3): INDEX 进度 0 → 0.3 → 0.95 → 1.0 是里程碑跳变, 非细粒度. M3 progress callback 框架就位后, _postprocess_segments 内可以按 segments 处理量推 progress
+- **LIM#7** (M3): mark_stage(progress=...) 是 set 不是 monotonic update, 任意调用方都能"回退"进度. M3 加 monotonic guard
+- **LIM#8** (M2a kickoff): runner.py L48-50 StageHandler Protocol docstring 与 L142 _stage_entrypoint 实现 drift. 必须在 M2a kickoff 前修, 否则下一个 handler 作者会重蹈 Round 3 BUG#7 覆辙
+
+**M1 milestone 终态**: 8/8 任务全完成, 总工时实际 ~5.6d vs 估算 6.8d (提前 18%), 测试 0 → 187. 下一步: M2a kickoff 前先修 LIM#8 (0.05d) → M1 e2e 人工验收 (0.2d) → M2a Scripting (5d).
+
+**写给未来自己的话** (压缩后续 session 上下文时优先保留):
+> M1.8 6 轮 self-check 的核心结论不是"找到了多少 bug", 而是**"用户为什么要追问 5 次"**. 答案: 我每轮都自信"已经检查干净了", 但真正干净的标准不是"找不到 bug 了", 而是**"已经把 scope 扩展到所有相关代码 (含依赖模块) + 完整 read + dry-run 实测"**. Round 1-5 都没做到第三条 (Round 3→4 还反向引入了 BUG#10). Round 6 终于做到了. 后续每个 milestone 完成时, 不等用户问就主动按这个 checklist 自查一遍, 才是"提前完成"的真正含义.

@@ -2,8 +2,8 @@
   "project": "autoclip",
   "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M1-infrastructure-COMPLETE (8/8 tasks; ready for e2e acceptance)",
-  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +27 tests net + 2 integration; commit 7a74d10); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
+  "phase": "M1-infrastructure-COMPLETE (8/8 tasks + 6 rounds self-check sealed; ready for e2e acceptance)",
+  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
   "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
@@ -60,21 +60,32 @@
     "id": "M1.8",
     "title": "Index stage handler — shot detector + ASR + audio.wav cleanup (K9)",
     "completed_at": "2026-05-04T22:05:00+08:00",
-    "commit": "7a74d10",
+    "self_check_sealed_at": "2026-05-04T23:30:00+08:00",
+    "commit_main": "7a74d10",
+    "commit_head": "1285acd",
+    "self_check_rounds": 6,
+    "self_check_commits": ["fe38cbf", "ba03849", "0b83337", "08a664a", "1285acd"],
     "files_added": 3,
     "files_modified": 1,
     "lines_added": 847,
     "lines_deleted": 1,
-    "tests_net_added": 27,
+    "tests_net_added": 31,
     "integration_tests_added": 2,
-    "actual_days": 0.6,
+    "actual_days": 0.8,
     "key_implementation_notes": [
       "naming: IndexStageError + IndexStageCancelledError (avoid Python builtin IndexError name collision in stack traces)",
       "_build_asr_provider() seam: Settings-driven LocalWhisperProvider construction; module-level so unit tests monkeypatch it instead of patching faster_whisper",
-      "_load_existing_shots() crash-recovery: if shots.json present from prior failed run, skip 30s+ shot detection on retry (asr.json is NEVER reused — partial writes are corrupt-safe)",
-      "_atomic_write_json(): tmp+os.replace pattern matching state.py _save_atomic style for crash-safe artifact writes",
+      "_load_existing_shots() crash-recovery: if shots.json present from prior failed run, skip 30s+ shot detection on retry (asr.json is NEVER reused — partial writes are corrupt-safe); except list narrowed to (json.JSONDecodeError, ValueError, KeyError, TypeError) per Round 3 BUG#9 — OSError must propagate",
+      "_atomic_write_json(): tmp + flush + fsync + os.replace mirroring state.py _save_atomic per Round 3 BUG#8 — without fsync OS crash could install empty tmp",
+      "RUNNING transition ownership: handler does NOT call mark_stage(RUNNING) — runner._stage_entrypoint owns it (Round 4 BUG#10 reverted Round 3 BUG#7 wrong fix). LIM#8 records that runner.py Protocol docstring still says 'Handler must mark its own RUNNING' which is false — fix deferred to M2a kickoff",
+      "Empty ASR sentences is LEGAL (silent / music-only audio per integration test docstring) but emits WARNING with audio_path/provider/language/actionable hint per Round 6 fix — observability for M2a scripting downstream failures",
       "K9 cleanup: Path.unlink(missing_ok=True) — idempotent; post-condition 'audio.wav does not exist' satisfied either way",
       "PEP 563: handler signature test asserts annotation in (None, 'None') because from __future__ import annotations defers evaluation to strings"
+    ],
+    "self_check_lessons_top3": [
+      "called API ≠ knows contract: must read RUNTIME caller's implementation (not just module-under-test or unit tests which mock the runtime path away). Round 3→4 self-introduced regression proved this",
+      "test design must include reverse assertions ('handler must NOT do X') paired with positive ones — protects against condition-widening regressions; Round 4 + Round 6 both used this pattern",
+      "expanding scope to read DEPENDENCIES (Shot.__post_init__ / _postprocess_segments drop rules / ASRBase schema / integration test docstrings) is the goldmine of multi-round self-check after re-reading the same files yields diminishing returns; Round 6 found 2 should-fix this way after 5 rounds of zero new finds on index.py itself"
     ]
   },
   "infra_baseline": {
@@ -137,14 +148,21 @@
     {"sha": "d307ffe", "msg": "✨feat: M1.7 PySceneDetect shot detector (amended for post-review dead-code removal)", "files": 3, "lines": 473},
     {"sha": "dd5f89a", "msg": "📝docs: worktree-save - sync .context for Session 8 (M1.7 done + post-review dead-code fix)", "files": 4, "lines": 135},
     {"sha": "7a74d10", "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)", "files": 4, "lines": 847},
-    {"sha": "ed0e0ff", "msg": "📝docs: worktree-save - sync .context for Session 9 (M1.8 done, M1 milestone 8/8) — amended to fold 2x E501 fixes in test_index_handler.py", "files": 5, "lines": 148, "note": "amended from 936ce72 to fold 2 strict-ruff E501 fixes (test docstring + happy_path with-block)"}
+    {"sha": "ed0e0ff", "msg": "📝docs: worktree-save - sync .context for Session 9 (M1.8 done, M1 milestone 8/8) — amended to fold 2x E501 fixes in test_index_handler.py", "files": 5, "lines": 148, "note": "amended from 936ce72 to fold 2 strict-ruff E501 fixes (test docstring + happy_path with-block)"},
+    {"sha": "faad1df", "msg": "🚧chore: sync state.json git_log[-1] to actual HEAD (post-amend correction)", "files": 1, "lines": 1},
+    {"sha": "936f217", "msg": "📝docs: worktree-save - record M1.8 post-implementation self-check + tech debt", "files": 1, "lines": 30, "note": "Round 1 self-check: keyword grep only, missed semantic bugs"},
+    {"sha": "fe38cbf", "msg": "🐛fix: M1.8 self-check round 2 — dead code, hidden assumptions, broken integration test", "files": 3, "lines": 110, "note": "5 must-fix: dead TYPE_CHECKING + shots empty crash hidden assumption + broken integration test rewritten to bytes+mtime strict reuse proof"},
+    {"sha": "ba03849", "msg": "🐛fix: M1.8 self-check round 3 — contract mismatches with state.py (RUNNING marker, fsync, OSError surfacing)", "files": 3, "lines": 165, "note": "3 contract bugs vs state.py; BUG#7 (RUNNING marker) was actually wrong, reverted in Round 4"},
+    {"sha": "0b83337", "msg": "🐛fix: M1.8 self-check round 4 — revert wrong BUG#7 fix from round 3 + harden OSError test", "files": 3, "lines": 71, "note": "self-introduced regression revert: read runner._stage_entrypoint, found it already marks RUNNING; reverse-assertion test guards against re-adding"},
+    {"sha": "08a664a", "msg": "🐛fix: M1.8 self-check round 5 — drop dead `_ = state` lines + document LIM#8 (runner.py Protocol docstring drift)", "files": 2, "lines": 23, "note": "dead code blind spot + new LIM#8 deferred to M2a tech debt cleanup"},
+    {"sha": "1285acd", "msg": "🐛fix: M1.8 self-check round 6 — clarify ValueError comment + WARN on empty ASR result + 2 new tests", "files": 3, "lines": 126, "note": "expanded scope to dependencies (Shot.__post_init__ / _postprocess_segments) found 2 should-fix; +2 positive/negative reverse-assertion test pairs"}
   ],
   "test_status": {
-    "total_tests": 183,
-    "passed": 177,
+    "total_tests": 187,
+    "passed": 181,
     "skipped": 6,
     "failed": 0,
-    "execution_time_sec": 4.33,
+    "execution_time_sec": 4.92,
     "coverage_overall_pct": 96,
     "coverage_providers_asr_pct": 99,
     "new_in_m1_5": {
@@ -165,9 +183,10 @@
       "_total_new": 17
     },
     "new_in_m1_8": {
-      "test_index_handler.py": 27,
+      "test_index_handler.py": 31,
       "test_index.py (integration, default skip)": 2,
-      "_total_new": 29
+      "_total_new": 33,
+      "_self_check_additions": "Round 3 +2 (RUNNING marker + OSError propagate, then Round 4 renamed/inverted RUNNING test → does_not_redundantly_mark_running, kept OSError); Round 6 +2 (empty-ASR positive + nonempty-ASR negative reverse-assertion pair)"
     }
   },  "kpi_tracking": {
     "K1_binding_accuracy": {"target": ">=0.7", "verified_at": "M2b.5", "actual": null},
@@ -182,6 +201,17 @@
     "K10_no_original_path": {"target": "100%", "verified_at": "M3.4+M3.5", "actual": "schema-level enforced + 本地 ASR 强化 (音频从未离开本地)"},
     "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
   },
+  "tech_debt": {
+    "LIM_8_runner_protocol_docstring_drift": {
+      "where": "src/autoclip/pipeline/runner.py L48-50",
+      "issue": "StageHandler Protocol docstring says 'Handler must mark its own RUNNING and DONE/FAILED' but L142 _stage_entrypoint already calls mark_stage(stage, RUNNING, progress=0.0) BEFORE invoking handler. This caused M1.8 Round 3 BUG#7 (I added redundant mark_stage(RUNNING) in handler per docstring instruction).",
+      "blast_radius": "next handler author (M2a scripting / M2b assembly / M3 render) reading the same docstring will repeat BUG#7",
+      "fix": "rewrite docstring: 'Handler MUST mark its own DONE/FAILED via JobStateFile, but RUNNING is owned by the entrypoint and should NOT be re-marked by the handler.'",
+      "fix_when": "M2a kickoff tech debt cleanup (before writing scripting handler)",
+      "introduced_in": "M1.4 (initial _stage_entrypoint design)",
+      "discovered_in": "M1.8 self-check Round 5"
+    }
+  },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-04T22:05:00+08:00"
+  "updated_at": "2026-05-04T23:30:00+08:00"
 }

@@ -517,17 +517,41 @@
 
 ### Verification (Session 9 累计)
 - 2 个 commit: 7a74d10 (M1.8 实现) + 待 commit (worktree-save 收尾)
-- 测试总数: 154 (150p+4s) → 183 (177p+6s) (净增 +29: 27 单测 + 2 集成)
+- 测试总数: 154 (150p+4s) → 187 (181p+6s) (净增 +33: 31 单测 + 2 集成, 经 6 轮 self-check 后)
 - M1 进度: **7/8 → 8/8 ✅ milestone 完成** (M1 端到端 e2e 验收待手动跑)
 - 整体进度: 21.21% → **24.24%** (8/33 任务)
 
+### M1.8 Self-Check Rounds 1-6 (用户连续 5 次追问触发, 8 commits 闭环)
+用户连续 5 次输入完全相同的问题: "请检查当前编辑的文件里, 是否存在未实现的部分、遗留的 todo、信息收集不充分导致的简化实现、假设实现". 这种"压力测试式追问"暴露了我多轮自检的盲区, 6 轮迭代下来共发现/修复 11 个问题 (含 1 处自我引入回归), 最终代码达到"扩展 scope 后仍只能找到注释/可观测性级别的 should-fix"的收敛状态.
+
+**各轮成果**:
+| Round | Commit | 必修数 | 关键发现 |
+|-------|--------|--------|---------|
+| 1 (#m1.8-8) | 936f217 | 1 | 仅 grep 关键词, 错过所有语义 bug; 仅记录 self-check + tech debt |
+| 2 | fe38cbf | 5 | 全文 read 后发现: dead TYPE_CHECKING import / shots[0] 未防空假设 / 集成测试设计错误 (无法触达 detect_shots) / pytest.raises 类型错 |
+| 3 | ba03849 | 3 | 跨模块契约对齐 state.py: 加 RUNNING marker (BUG#7) + fsync (BUG#8) + OSError 不吞咽 (BUG#9) |
+| 4 | 0b83337 | 1 自我回归 | **Round 3 BUG#7 是错的!** read runner.py L142 才发现 _stage_entrypoint 已经 mark RUNNING, handler 重复 mark 是冗余调用 + 影响 progress ownership. 撤销 + 反向断言测试守护 |
+| 5 | 08a664a | 1 + LIM#8 | dead `_ = state` (Round 4 遗漏); 发现 runner.py Protocol docstring 与实现 drift (LIM#8 留 M2a kickoff 修, 不污染 M1.4 commit) |
+| 6 | 1285acd | 2 should-fix | 首次完整 read 被依赖模块 (Shot.__post_init__ + LocalWhisperProvider._postprocess_segments + ASRBase + integration test): 补 ValueError 注释三类业务规则 + ASR 空 sentences WARN; +2 正反单测 |
+
+**8 个 M1.8 commits 全景**: 7a74d10 (主实现) → ed0e0ff/faad1df (worktree-save 修正) → 936f217 (Round 1 self-check 记录) → fe38cbf → ba03849 → 0b83337 → 08a664a → 1285acd (HEAD).
+
+**3 个核心元教训** (沉淀到 state.json.previous_task.self_check_lessons_top3):
+1. **"called API ≠ knows contract"**: 必须 read 真实 RUNTIME 调用方实现, 不能只看自己写的代码或单测 (单测会 mock 掉 runtime path). Round 3→4 自我回归是这条教训的活案例
+2. **测试反向断言**: 给 "handler MUST do X" 加配对的 "handler MUST NOT do Y" 测试 (Round 4 + Round 6 都用了), 防止条件被误改宽
+3. **扩展 scope 到依赖模块**: 反复 read 同一组文件边际收益递减, Round 6 把视野扩展到 4 个被依赖模块的真实实现, 立刻找到 2 处新 should-fix
+
+**新增 LIM#8** (留 M2a kickoff tech debt cleanup):
+- `runner.py:48-50` StageHandler Protocol docstring 说 "Handler must mark its own RUNNING and DONE/FAILED" 但 `_stage_entrypoint:142` 已经替 handler 标了 RUNNING. 这是 M1.4 历史 contract bug, 直接导致 Round 3 BUG#7. 必须在 M2a 之前修, 否则下一个 handler 作者读 docstring 会重蹈覆辙
+
 ### M1 总结 (整个 milestone 跨 9 个 session)
-- 总工时实际 ~5.4d vs 估算 6.8d, **提前 20%**
-- 测试积累: 0 → 183 (177 passed + 6 skipped 集成默认 skip)
+- 总工时实际 ~5.6d vs 估算 6.8d, **提前 18%** (M1.8 6 轮 self-check 多花 0.2d)
+- 测试积累: 0 → 187 (181 passed + 6 skipped 集成默认 skip)
 - 5 个核心模块全部交付: state machine (M1.3) / runner (M1.4) / ASR provider (M1.5) / Ingest stage (M1.6) / Shot detector (M1.7) / Index stage (M1.8)
 - KPI 兑现: K7 (5-stage pipeline 跑通) ✅ / K8 (shot 检测 + Whisper ASR 集成) ✅ / K9 (audio.wav 在 Index DONE 后必删, atomic 化设计) ✅
 - 关键架构决策落地: spawn 子进程隔离 / 文件状态机 / atomic JSON 写 / lazy import / 双轨 normalize / FrozenInstanceError 严格断言 / 命名避坑 (IndexStageError) / resume 失败容错
 
 ### 下一步 (Session 10)
+- **M2a kickoff 前** (0.05d): 修 LIM#8 — runner.py StageHandler Protocol docstring 与 _stage_entrypoint 实现对齐, 明确 "RUNNING owned by entrypoint, handler must mark DONE/FAILED only"
 - **M1 e2e 验收** (人工, 0.2d): uvicorn 启动 → curl POST /api/jobs 5min 短片 → 验证 2min 内全 DONE / shots.json + asr.json 合规 / audio.wav 已删
 - **M2a Scripting 主链路启动** (W2 周, 6 任务, ~5d): 候选脚本生成 + 评分 + 选优, 依赖 M1 e2e 验收锁定 shots.json + asr.json schema
