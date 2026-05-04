@@ -205,11 +205,14 @@ Timeline (1) ── (1) Video
 
 class Video:
     id: str                  # uuid
-    file_path: str           # 原视频本地路径
+    file_path: str           # 原视频本地路径（M3.8 cleanup 后置 None）
     duration_sec: float      # 总时长
     fps: float
     resolution: tuple[int, int]
-    audio_path: str          # 分离出的音轨 wav
+    # ↓ v0.5 ADR-010 双轨 normalize 产物
+    normalized_low_path: str  # 720p 25fps，给 PySceneDetect / KeyFrameDesc
+    normalized_hd_path: str   # 1080p 原帧率，给 Render 出片（M3.4/M3.5）
+    audio_path: str          # 16kHz mono pcm_s16le，给 LocalWhisperProvider
     metadata: dict           # codec / bitrate 等
 
 class Shot:                  # 镜头分段（视觉原子单位）
@@ -2280,3 +2283,54 @@ def transcribe(audio_path: Path, language: str = "zh") -> ASRResult:
 | R16 | LLM 角色推断在多人混淆场景出错 | 🟡 中 | 🟢 低 | M2a.2 prompt 加 few-shot 示例；v1.1 加声纹兜底（路径 3） |
 | R17 | M3 Pro 之外的低配 Mac 跑 large-v3 内存爆 | 🟢 低 | 🟡 中 | Settings 提供 model_size 配置项，文档建议低配机降到 medium |
 
+
+---
+
+## 24. ADR-010（新增）：M1.6 Ingest 改双轨 normalize（low + hd）
+
+**触发**: 2026-05-04 v0.5 adhoc — 单轨 720p normalize 满足检测但损失出片画质（用户上传 1080p 强制降到 720p 出片不可接受）。
+
+**决策**: Ingest 阶段产出**双轨**归一化视频（替换原单轨方案）：
+
+| 产物 | 分辨率 / fps | 编码参数 | 用途 | 后续阶段 |
+|---|---|---|---|---|
+| `normalized_low.mp4` | scale=-2:720, fps=25 | libx264 crf=23 preset=medium + aac 128k + faststart | 视觉检测 / ASR 喂料 | M1.7 PySceneDetect / M1.8 ASR |
+| `normalized_hd.mp4` | scale=-2:1080, 原 fps | libx264 crf=21 preset=medium + aac 192k + faststart | Render 出片 | M3.4 剪映 / M3.5 mp4 拼接 |
+| `audio.wav` | 16kHz mono pcm_s16le | -vn -ac 1 -ar 16000 -c:a pcm_s16le（从 hd 抽） | ASR 输入 | M1.8 LocalWhisperProvider |
+
+**关键约束**:
+- 720p 检测必须与 1080p 出片**语义对齐**：shot 的 (start_sec, end_sec) 可直接复用到 hd 轨道（fps 差异通过秒级时间戳天然对齐）；ClipBinding 的时间码同样跨轨道有效
+- 若原片本身 < 1080p：hd 轨道按 `min(原高度, 1080)` 处理，不做 upscale（避免无效编码）
+- 若原片本身 < 720p：low 轨道仍按 720p（small upscale 影响可忽略），保证检测算法的输入分辨率稳定
+
+**进度上报方案**（M1.6 handler）:
+```
+0.00 ─ stage start
+0.05 ─ probe done (ffprobe)
+0.45 ─ normalize_low done
+0.85 ─ normalize_hd done
+0.95 ─ audio extract done
+1.00 ─ stage DONE
+```
+
+**磁盘成本**:
+- 90min 1080p H.264 原片约 3-5GB；low + hd 双轨约 1.5-2.5GB（crf 主导，分辨率次之）
+- 总占用约 raw 的 0.5-0.8x；M3.8 cleanup 阶段删除 raw + low，保留 hd（出片源）
+- **R18 缓解开关**: Settings 暴露 `INGEST_SINGLE_TRACK=1`，强制只产出 hd（low 用 hd 做软链接）；用于磁盘吃紧场景应急
+
+**工期影响**: M1.6 由 1.0d → 1.3d（+0.3d 用于第二轨命令构建、handler 编排扩展、对应单测增加）；全工期 31.5d → 31.8d。
+
+**KPI 影响**:
+- **K1（绑定准确率）**: 不变 — 检测 / 出片语义对齐保证 ClipBinding 时间码正确
+- **K6（端到端耗时）**: Ingest 阶段 +30-50% 实际耗时（CPU 编码 2 次）；M4.5 验证总耗时仍 ≤ 16min/90min（M3 Pro 11 核可并行）
+- **K9（raw 删除）**: 增强 — cleanup 后 raw + low 都删，仅 hd 保留作出片源
+
+**为什么不选其他方案**:
+| 方案 | 否决原因 |
+|---|---|
+| A. 单轨 720p（原 v0.4） | 出片画质损失大；用户上传 4K 强制 720p 出片不可接受 |
+| B. 单轨 1080p（直接给 PySceneDetect） | shot 检测耗时翻倍；KeyFrameDesc 提取（v1.1+）耗时也涨 |
+| C. 检测时 on-the-fly down-scale（不落盘） | 每次重跑都要重做 down-scale；ffmpeg 启动开销叠加；缓存逻辑复杂 |
+| **D. 双轨落盘**（采纳） | 磁盘换 CPU；检测 / 出片关注点分离；语义天然对齐 |
+
+**回滚策略**: 若 R18 触发严重磁盘问题，可走 INGEST_SINGLE_TRACK=1 应急（functional 等价于 ADR-010 之前的方案，但 hd 轨道不丢失出片质量）。

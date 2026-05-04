@@ -209,6 +209,7 @@ autoclip/
 | R15 | faster-whisper 模型权重首次下载慢/失败 | 🟡 中 | 🟡 中 | M1.5 提供 `scripts/preload_whisper.py`；CI 缓存 | 待 M1.5 验证 |
 | R16 | LLM 角色推断在多人混淆场景出错（ADR-009 路径 2） | 🟡 中 | 🟢 低 | M2a.2 prompt 加 few-shot；v1.1 加声纹兜底 | 待 M2a 验证 |
 | R17 | 低配 Mac 跑 large-v3 内存爆 | 🟢 低 | 🟡 中 | Settings 暴露 model_size 配置项，文档建议降到 medium | 待 M1.5 验证 |
+| R18 | 双轨 normalize 磁盘占用 2x（v0.5） | 🟡 中 | 🟢 低 | M3.8 cleanup 删除 low 保留 hd；Settings 可选 `INGEST_SINGLE_TRACK=1` 强制单轨降级（应急开关） | 待 M1.6 实现 |
 | R3 | LLM 幻觉 evidence_keywords | 🟡 中 | 🔴 高 | M2b post-validation 反向校验兜底 | 待 M2b 验证 |
 | R4 | macOS spawn 模式下子进程模型加载慢 | 🟡 中 | 🟢 低 | 子进程内独立加载；进程池复用 | 待 M1 验证 |
 | R5 | KPI（K1-K3）不达标导致 MVP 延期 | 🟡 中 | 🟡 中 | Week 6 buffer 兜底；P0 KPI 严守 | 待 M2b 验证 |
@@ -223,4 +224,5 @@ autoclip/
 |---|---|---|
 | 2026-05-04 | v0.1 | 初始总控文档创建（替代旧的 3847 行实现代码版） |
 | 2026-05-04 | v0.2 | adhoc：ASR 改本地 faster-whisper + large-v3（design.md Part IV §21）；MVP 加 LLM 推断角色（§22 ADR-009）；M1.5 工期 1d→0.5d；总工期 -0.5d；R2 解除，新增 R15/R16/R17 |
+| 2026-05-04 | v0.3 | adhoc：M1.6 Ingest 改**双轨 normalize**（normalized_low.mp4 给检测 + normalized_hd.mp4 给出片，design.md Part IV §24 ADR-010）；M1.6 工期 1.0d→1.3d；M1 总工期 6.5d→6.8d，全工期 31.5d→31.8d；新增 R18（双轨磁盘成本 2x） |
 

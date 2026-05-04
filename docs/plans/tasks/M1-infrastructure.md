@@ -223,39 +223,53 @@
 
 ---
 
-### M1.6 — Ingest Stage（FFmpeg 视频归一化 + 音频抽离）
+### M1.6 — Ingest Stage（FFmpeg 双轨 normalize + 音频抽离）（v0.5 修订）
 
-**目标**: 实现第一个具体 stage handler — 把上传的原片归一化为 H.264 720p 25fps + 抽离 16kHz mono WAV。
+**目标**: 实现第一个具体 stage handler — 把上传的原片**双轨归一化**（720p low 给检测 / 1080p hd 给出片）+ 抽离 16kHz mono WAV。
+
+> **v0.5 adhoc（2026-05-04）**: 单轨 → 双轨 normalize（design.md Part IV §24 ADR-010）。工时 1.0d → 1.3d。详见 plan.md changelog v0.3。
 
 **关键设计决策**:
 - **ffmpeg 命令封装**（utils 层，可独立测试）:
-  - `probe_video(path)` → ffprobe JSON
-  - `build_normalize_cmd(src, dst, fps=25, height=720)` → libx264 + crf=23 + faststart
-  - `build_extract_audio_cmd(src, dst)` → -vn -ac 1 -ar 16000 -c:a pcm_s16le
-- **进度上报**: 0.1（probe done）→ 0.6（normalize done）→ 0.95（audio done）→ 1.0（DONE）
-- **Cancel 自检**: 在 normalize / audio 之间检查 `is_cancelled()`
-- **失败兜底**: 任何异常都 mark FAILED 并抛出（让父进程感知 exitcode）
-- **handler 签名**: `run_ingest(job_dir: Path, stage_name: str)` → 通过 `register_stage_handler(Stage.INGEST, run_ingest)` 注册
+  - `probe_video(path)` → ffprobe JSON（codec / resolution / fps / duration / has_audio）
+  - `build_normalize_low_cmd(src, dst)` → 720p 25fps，libx264 + crf=23 + preset=medium + faststart + aac 128k
+  - `build_normalize_hd_cmd(src, dst)` → 1080p 原帧率，libx264 + crf=21 + preset=medium + faststart + aac 192k
+  - `build_extract_audio_cmd(src, dst)` → -vn -ac 1 -ar 16000 -c:a pcm_s16le（**喂给 LocalWhisperProvider**）
+- **双轨产物语义**（design.md §6.1 Video 实体新增字段）:
+  - `normalized_low.mp4` → 给 PySceneDetect（M1.7）+ KeyFrameDesc（v1.1+）
+  - `normalized_hd.mp4` → 给 Render 阶段（M3.4 剪映 / M3.5 mp4 拼接）出片源
+  - `audio.wav` → 给 ASR（M1.8）；通常从 hd 抽（保留更多采样信息）
+- **进度上报**: 0.05（probe）→ 0.45（normalize_low）→ 0.85（normalize_hd）→ 0.95（audio）→ 1.0
+- **Cancel 自检**: 在 4 个阶段之间各检查一次 `is_cancelled()`
+- **失败兜底**: 任何异常都 mark FAILED 并抛出（让父进程感知 exitcode）；已生成的临时产物保留供 debug
+- **handler 签名**: `run_ingest(job_dir: Path, stage_name: str)` → `register_stage_handler(Stage.INGEST, run_ingest)`
+- **输入约定**: `job_dir/raw/<filename>` 存放用户上传的原片；handler 自动 glob 找第一个视频文件
+- **磁盘成本**: 双轨产物约为单轨 1.6-2.0x；M3.8 cleanup 时**保留 hd 删除 low**（low 已经完成 shot/asr 索引使命）
 
 **涉及文件**:
-- Create: `src/autoclip/utils/{__init__,ffmpeg}.py`
-- Create: `src/autoclip/pipeline/ingest.py`
-- Create: `tests/unit/test_ffmpeg_utils.py`
-- Create: `tests/integration/test_ingest.py`（需 ffmpeg + sample.mp4 fixture）
+- Create: `src/autoclip/utils/{__init__,ffmpeg}.py`（probe + 3 个 build_* 函数）
+- Create: `src/autoclip/pipeline/ingest.py`（run_ingest handler，4 阶段编排）
+- Create: `tests/unit/test_ffmpeg_utils.py`（命令片段断言，不真跑 ffmpeg）
+- Create: `tests/integration/test_ingest.py`（默认 skip，RUN_INTEGRATION=1 启用）
 - Modify: `src/autoclip/pipeline/__init__.py`（追加 `from . import ingest`）
 
 **测试策略**:
-- 单元: 测试 build_normalize_cmd / build_extract_audio_cmd 命令片段正确（不真跑 ffmpeg）
-- 集成: 真跑 5s 短片 fixture，验证 normalized.mp4 + audio.wav 生成 + state DONE
+- 单元（必须）: 测试 4 个 build_* 函数返回的命令片段正确；test_run_ingest_emits_progress（mock subprocess）；test_run_ingest_cancel_between_stages
+- 集成（手跑）: 真跑 ~/Downloads 用户视频前 30s，验证 3 个产物 + state DONE + 进度字段单调递增
 
 **验收标准**:
-- [ ] ffmpeg 命令构造测试通过
-- [ ] 集成测试（手跑）：5s 短片 ingest 完成 < 30s
-- [ ] state.json 进度字段正确递增
+- [ ] ffmpeg 命令构造测试通过（4 个 build_*）
+- [ ] handler 单元测试通过（mock subprocess + cancel 自检 + 进度上报）
+- [ ] 集成测试（手跑）：30s 短片 ingest 完成 < 30s（M3 Pro）
+- [ ] state.json 进度字段正确递增（0.05 → 0.45 → 0.85 → 0.95 → 1.0）
+- [ ] 产物三件套同时存在: normalized_low.mp4 + normalized_hd.mp4 + audio.wav
 
-**关联 KPI**: K6（端到端耗时基线）
-**依赖**: M1.4 + 系统已装 ffmpeg → **阻塞**: M1.7（需要 normalized.mp4） / M1.8（需要 audio.wav）
-**预估工时**: 1d
+**关联 KPI**:
+- K6（端到端耗时基线）— 双轨较单轨 +30-50% ingest 耗时；M4.5 端到端测试时验证总耗时仍 ≤ 16min/90min
+- K1（绑定准确率）— 不变；low 轨道保证 720p 检测语义与 hd 出片语义对齐
+
+**依赖**: M1.4（PipelineRunner）+ 系统已装 ffmpeg → **阻塞**: M1.7（需要 normalized_low.mp4） / M1.8（需要 audio.wav） / M3.4/M3.5（需要 normalized_hd.mp4）
+**预估工时**: 1.3d（v0.5 修订；原 1.0d + 0.3d 用于第二轨编码 + 测试用例增加）
 
 ---
 
@@ -331,10 +345,10 @@
 | M1.3 状态机 | 0.5d |
 | M1.4 Runner + API | 1.5d |
 | M1.5 ASR Provider（v0.4 本地化后） | **0.5d**（原 1.0d） |
-| M1.6 Ingest | 1.0d |
+| M1.6 Ingest（v0.5 双轨 normalize 后） | **1.3d**（原 1.0d） |
 | M1.7 Shot detector | 0.5d |
 | M1.8 Index 集成 | 1.0d |
-| **总计** | **6.5d**（v0.4 节省 0.5d，控制在 W1 内更宽松）|
+| **总计** | **6.8d**（v0.4 -0.5d + v0.5 +0.3d，仍控制在 W1 内）|
 
 ## M1 完成时的 git 行为
 按 250.md 规范，每个 task 至少 1 次 commit。Milestone 整体可考虑一次 squash merge 到 main 时使用如下 PR 描述模板：
