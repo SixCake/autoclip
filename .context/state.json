@@ -136,7 +136,8 @@
     {"sha": "e25f07a", "msg": "✨feat: M1.7 PySceneDetect shot detector (algo layer, 17 unit tests)", "files": 3, "lines": 482, "note": "amended into d307ffe — see below"},
     {"sha": "d307ffe", "msg": "✨feat: M1.7 PySceneDetect shot detector (amended for post-review dead-code removal)", "files": 3, "lines": 473},
     {"sha": "dd5f89a", "msg": "📝docs: worktree-save - sync .context for Session 8 (M1.7 done + post-review dead-code fix)", "files": 4, "lines": 135},
-    {"sha": "7a74d10", "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)", "files": 4, "lines": 847}
+    {"sha": "7a74d10", "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)", "files": 4, "lines": 847},
+    {"sha": "ed0e0ff", "msg": "📝docs: worktree-save - sync .context for Session 9 (M1.8 done, M1 milestone 8/8) — amended to fold 2x E501 fixes in test_index_handler.py", "files": 5, "lines": 148, "note": "amended from 936ce72 to fold 2 strict-ruff E501 fixes (test docstring + happy_path with-block)"}
   ],
   "test_status": {
     "total_tests": 183,
