@@ -32,6 +32,7 @@ Contract with PipelineRunner (see runner.py `_stage_entrypoint`):
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -97,13 +98,17 @@ def _build_asr_provider() -> ASRProvider:
 
 
 def _load_existing_shots(shots_path: Path) -> list[Shot] | None:
-    """Try to reload shots.json from a prior run. Returns None on any failure.
+    """Try to reload shots.json from a prior run. Returns None on data corruption.
 
     Used for crash-recovery: if a previous Index run completed shot detection
     but failed during ASR, we skip the (expensive) re-detection on retry.
 
-    We deliberately swallow errors here (corrupt/old-format shots.json should
-    just trigger a fresh detection, not abort the stage).
+    We swallow ONLY data-corruption errors (malformed JSON, missing fields,
+    wrong types). Real OS-level failures (PermissionError, IsADirectoryError,
+    disk I/O errors) are deliberately allowed to propagate — silently treating
+    a permission-denied error as "corrupt file → re-detect" would let
+    detect_shots run for 30s only to fail at the same write step, hiding
+    the real root cause.
     """
     if not shots_path.exists():
         return None
@@ -117,7 +122,9 @@ def _load_existing_shots(shots_path: Path) -> list[Shot] | None:
             )
             for s in payload["shots"]
         ]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
+        # Note: json.JSONDecodeError is a subclass of ValueError; listed
+        # explicitly for clarity. OSError is intentionally NOT caught here.
         logger.warning(
             "[index] existing {} unreadable ({}); will re-detect",
             shots_path.name,
@@ -136,10 +143,20 @@ def _load_existing_shots(shots_path: Path) -> list[Shot] | None:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Write JSON via tmp + os.replace for crash-safe atomicity."""
+    """Write JSON crash-safely: tmp + flush + fsync + os.replace.
+
+    Mirrors the write strategy in `state.py::_save_atomic` so all
+    pipeline-produced JSON artifacts share identical durability guarantees.
+    Without fsync, an OS crash between write() and the next sync could leave
+    the tmp file empty, after which os.replace would atomically install an
+    empty file as the "atomic" output.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, **_JSON_DUMP_KWARGS), encoding="utf-8")
-    tmp.replace(path)
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, **_JSON_DUMP_KWARGS)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def _shots_to_payload(shots: list[Shot]) -> dict[str, Any]:
@@ -177,6 +194,12 @@ def run_index(job_dir: Path) -> None:
         raise IndexStageError(
             f"required input missing: {audio_path} (Ingest stage M1.6 produces this)"
         )
+
+    # --- Mark stage RUNNING up front (per PipelineRunner contract). ---
+    # state.py::mark_stage only stamps `started_at` on the first RUNNING
+    # transition; without this call the slot would stay PENDING for ~30s
+    # while shot detection runs, breaking progress polling and timing data.
+    state.mark_stage(Stage.INDEX, StageStatus.RUNNING, progress=0.0)
 
     # --- Step 1: shot detection (or reuse from prior run) — progress 0.3 ---
     _check_cancel(state, "shot_detection")

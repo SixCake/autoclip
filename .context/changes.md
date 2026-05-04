@@ -749,3 +749,28 @@ User in pre-M1.5 phase:
 - 上一轮 #m1.8-8 自检只 grep 关键词 (TODO/FIXME/NotImplemented/placeholder/stub/simplified), **完全没看出 BUG#1-5**, 因为这 5 个 bug 都不是关键词层面的, 而是语义层面的 "假设/简化/未防御". 关键词 grep 只能挡"明显占位符", 挡不住"凭直觉写代码导致的隐含假设"
 - 真正有效的自检方法是用户这次要求的: 完整 read 文件后逐行问"这里假设了什么? 这个假设有保障吗? 不满足时会怎样?". 这种语义自检后续每个 milestone 收尾必须做一遍, 不能只 grep 了事
 - 集成测试 default-skip 看似"安全网", 实际上是"无人检查的死代码温床" — 我写完后从没真跑过 RUN_INTEGRATION=1, 错误的异常类型 + 错误的执行路径假设直到用户追问才暴露. 后续约定: 集成测试至少在本地跑过一次再 commit, 不能只靠 collect-only 验证
+
+### Post-Implementation Self-Check Round 3 (用户第二次主动追问触发)
+**触发**: 用户**再次**输入相同问题"请检查当前编辑的文件里, 是否存在未实现的部分、遗留的 todo、信息收集不充分导致的简化实现、假设实现". Round 2 修完之后我以为已经干净, 这次不带任何先入之见再做一轮, 重新完整 read index.py + test_index_handler.py + test_index.py + state.py + shot_detector.py 头部 + local_whisper.py 头部, 对**调用契约**做交叉验证
+
+**发现 3 个 must-fix bug** (全部是与依赖模块的契约不一致):
+- **BUG#7 RUNNING marker 缺失** (index.py run_index): 我刚 read 了 state.py L113-128 的 mark_stage 实现, 发现"started_at 仅在第一次 RUNNING transition 时设置". 当前 handler 第一次调 mark_stage 已经是 shot detection 完成后了 (progress=0.3), 这意味着: (a) shot detection 的 30s 内 INDEX slot 状态还是 PENDING, 前端轮询完全看不到 stage 在跑 (b) `started_at` 永远是 None, 时间统计/审计全废. 而 runner.py L48-50 docstring 明写 "Handler must mark its own RUNNING and DONE/FAILED states via JobStateFile" — 我**违反了 PipelineRunner 显式契约**. 修复: pre-flight 后立即 mark_stage(RUNNING, 0.0), 然后才 _check_cancel + detect_shots
+- **BUG#8 fsync 缺失致原子写不完整** (index.py _atomic_write_json): 对比刚 read 的 state.py L137-143 _save_atomic, 发现项目内已有"f.flush() + os.fsync(f.fileno()) + os.replace"的标准三段式持久化模式, 但我的 _atomic_write_json 用的是 `Path.write_text + Path.replace` — **少了 fsync**. 后果: OS 崩溃/断电时 tmp 文件内容可能还在 OS buffer 里没落盘, os.replace 之后 shots.json/asr.json 是空文件 (这正是 _load_existing_shots 的"空 list 重检测"分支永远防不住的真实灾难场景, 因为它发生在 reload 之前). 同项目同类持久化必须用同一个套路. 修复: 改为与 state.py 完全一致的 `with tmp.open('w') as f: json.dump(...); f.flush(); os.fsync(f.fileno()); os.replace(tmp, path)`
+- **BUG#9 OSError 被错误吞咽** (index.py _load_existing_shots): except 列表是 `(OSError, ValueError, KeyError, TypeError)` — 这把"真磁盘故障"和"数据损坏"混为一谈. 当 shots.json 因 NFS 故障/坏块/权限问题读不出时, 当前实现转成"re-detect", 接下来 detect_shots 跑 30s 后再写 shots.json 还是会 OSError, 但**这次错误信息丢了上下文 (操作员看到的是写失败, 根因是读失败)**. 修复: except 改为 `(json.JSONDecodeError, ValueError, KeyError, TypeError)`, OSError 直接冒泡
+
+**发现 1 个 known-limitation (M1 不修, 记录留给 M3)**:
+- **LIM#7 mark_stage(progress=X) 是 set 不是 monotonic update** (state.py 契约 + index.py 调用模式): 当前 mark_stage 调用模式是 `mark_stage(RUNNING, 0.3)` → 直接 set 0.3. 若 M3 给 detect_shots / Whisper 加了 progress callback (callback 期间多次上报 0.05/0.1/...), 我的 0.3 会**回退**已经上报到 0.6 的进度. M1 阶段没有 callback 所以不是 bug, 但 M3 引入 callback 时必须重构: 要么 mark_stage 内部加 monotonic 保护 (max(old, new)), 要么 handler 改用 update_if_higher 方法
+
+**1 个 NOT-bug 排除** (避免过度修复):
+- pre-flight `if not low_path.exists()` 与后续 detect_shots 之间存在 microseconds 的 TOCTOU 窗口. 但 PipelineRunner 设计是 spawn 子进程独占 job_dir, **没有任何其他进程会动 audio.wav** — 这是 system architecture 保证不是 bug. 不修不记
+
+**Round 3 修复后验证**:
+- ruff default + ruff strict (F,E,W,UP,SIM,B,RUF) on M1.8 三文件: All checks passed!
+- pytest 全量回归: 177 → 179 passed (净增 +2: test_run_index_marks_running_before_shot_detection 通过 detect_shots side_effect 在调用瞬间快照 INDEX slot 验证 status==RUNNING+started_at!=None; test_load_existing_shots_propagates_oserror 用 patch.object(Path, 'read_text', side_effect=PermissionError) 验证不被吞咽). 同时扩展了 test_run_index_progress_milestones, 把进度序列从 [0.3, 0.95, None] 改为 [0.0, 0.3, 0.95, None] + 新增 statuses_seen [RUNNING, RUNNING, RUNNING, DONE] 验证状态转换序列
+- read_lints: No lint errors found
+
+**Round 3 教训** (比 Round 2 更深一层):
+- Round 2 我用"语义自检"找到了 BUG#1-5, 以为已经够细了. **结果还有 3 个 contract-mismatch bug 没看出来**, 因为它们是"我写的代码自己看怎么都对, 但跟依赖模块的契约对不上". 必须配合**完整 read 依赖模块的 API 契约**来交叉验证, 不能只读自己写的代码
+- 具体到这次: 我从未真正完整 read 过 state.py 的 mark_stage 实现 (只调用过 API, 没看实现), 也从未真正比对过 _atomic_write_json 与 state.py _save_atomic 的实现差异. **"调过 API 不等于知道契约"** — 任何跨模块调用前都必须 read 一次被调方的实现细节
+- BUG#7 (RUNNING marker) + BUG#8 (fsync) 都是"项目内同类操作其他模块已经做对, 我自己重新发明轮子时偷工减料". 后续约定: **遇到任何"看起来已有项目模式可参考"的代码 (持久化/状态机/atomic IO/etc), 必须先 grep + read 现有实现, 直接复用或对齐, 不再重新发明**
+- 用户两次提**完全相同的问题**这件事本身就是信号: 第一次问后我修了, 但用户清楚我"修一轮还会留货", 所以再问一次. 这次再修后, 下次还可能有 Round 4 — **真正的安全做法是每次完成功能后, 把语义自检 + 跨模块契约对齐当成强制 checklist, 不等用户问**

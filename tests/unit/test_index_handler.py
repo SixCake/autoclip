@@ -195,6 +195,26 @@ def test_load_existing_shots_wrong_schema_returns_none(tmp_path: Path):
     assert _load_existing_shots(p) is None
 
 
+def test_load_existing_shots_propagates_oserror(tmp_path: Path):
+    """Real OS-level failures (PermissionError etc.) must NOT be swallowed.
+
+    Silently treating a permission error as 'corrupt → re-detect' would
+    let detect_shots run for ~30s only to hit the same OSError on the
+    subsequent atomic write, hiding the real root cause from the operator.
+    """
+    p = tmp_path / SHOTS_FILENAME
+    p.write_text("{}", encoding="utf-8")  # exists() must return True
+
+    # Simulate a transient I/O error mid-read (e.g. NFS hiccup, bad sector)
+    with (
+        patch.object(
+            Path, "read_text", side_effect=PermissionError("simulated denied")
+        ),
+        pytest.raises(PermissionError, match="simulated denied"),
+    ):
+        _load_existing_shots(p)
+
+
 # ---------------------------------------------------------------------------
 # _check_cancel
 # ---------------------------------------------------------------------------
@@ -320,6 +340,7 @@ def test_run_index_progress_milestones(job_dir: Path):
     fake_provider.transcribe.return_value = _make_asr_result()
 
     progress_seen: list[float | None] = []
+    statuses_seen: list[StageStatus] = []
 
     real_state = JobStateFile(job_dir)
     real_mark = real_state.mark_stage
@@ -327,6 +348,7 @@ def test_run_index_progress_milestones(job_dir: Path):
     def spy(stage, status, progress=None, error=None):
         if stage == Stage.INDEX:
             progress_seen.append(progress)
+            statuses_seen.append(status)
         return real_mark(stage, status, progress=progress, error=error)
 
     with (
@@ -336,9 +358,52 @@ def test_run_index_progress_milestones(job_dir: Path):
     ):
         run_index(job_dir)
 
+    # 0.0 (initial RUNNING marker, per PipelineRunner contract),
     # 0.3 (post-shots), 0.95 (post-asr), then None for the final DONE
     # (DONE doesn't pass progress; mark_stage auto-sets it to 1.0)
-    assert progress_seen == [0.3, 0.95, None]
+    assert progress_seen == [0.0, 0.3, 0.95, None]
+    assert statuses_seen == [
+        StageStatus.RUNNING,
+        StageStatus.RUNNING,
+        StageStatus.RUNNING,
+        StageStatus.DONE,
+    ]
+
+
+def test_run_index_marks_running_before_shot_detection(job_dir: Path):
+    """RUNNING must be set BEFORE detect_shots runs so `started_at` gets stamped.
+
+    state.py::mark_stage only sets started_at on the first RUNNING transition.
+    Without an explicit pre-detection mark, the slot would stay PENDING for
+    ~30s while shot detection runs, breaking progress polling and timing.
+    """
+    fake_provider = MagicMock()
+    fake_provider.transcribe.return_value = _make_asr_result()
+
+    captured_status_at_detect: dict[str, str | None] = {"status": None, "started_at": None}
+
+    def detect_capture(_video_path):
+        # Snapshot the INDEX slot at the moment detect_shots is invoked
+        snap = JobStateFile(job_dir).load()["stages"][Stage.INDEX.value]
+        captured_status_at_detect["status"] = snap["status"]
+        captured_status_at_detect["started_at"] = snap["started_at"]
+        return _make_shots(2)
+
+    with (
+        patch("autoclip.pipeline.index.detect_shots", side_effect=detect_capture),
+        patch("autoclip.pipeline.index._build_asr_provider", return_value=fake_provider),
+    ):
+        run_index(job_dir)
+
+    # At detect_shots invocation, slot must already be RUNNING + timestamped
+    assert captured_status_at_detect["status"] == StageStatus.RUNNING.value
+    assert captured_status_at_detect["started_at"] is not None
+
+    # And the post-run state has started_at preserved + finished_at set
+    final = JobStateFile(job_dir).load()["stages"][Stage.INDEX.value]
+    assert final["started_at"] is not None
+    assert final["finished_at"] is not None
+    assert final["status"] == StageStatus.DONE.value
 
 
 # ---------------------------------------------------------------------------
