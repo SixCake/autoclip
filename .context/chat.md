@@ -521,8 +521,8 @@
 - M1 进度: **7/8 → 8/8 ✅ milestone 完成** (M1 端到端 e2e 验收待手动跑)
 - 整体进度: 21.21% → **24.24%** (8/33 任务)
 
-### M1.8 Self-Check Rounds 1-6 (用户连续 5 次追问触发, 8 commits 闭环)
-用户连续 5 次输入完全相同的问题: "请检查当前编辑的文件里, 是否存在未实现的部分、遗留的 todo、信息收集不充分导致的简化实现、假设实现". 这种"压力测试式追问"暴露了我多轮自检的盲区, 6 轮迭代下来共发现/修复 11 个问题 (含 1 处自我引入回归), 最终代码达到"扩展 scope 后仍只能找到注释/可观测性级别的 should-fix"的收敛状态.
+### M1.8 Self-Check Rounds 1-10 (用户连续 9 次追问触发, 12 commits 闭环, Round 10 FINAL sealed per LIM#9)
+用户连续 9 次输入完全相同的问题: "请检查当前编辑的文件里, 是否存在未实现的部分、遗留的 todo、信息收集不充分导致的简化实现、假设实现". 这种"压力测试式追问"分两个阶段暴露盲区: **Rounds 1-6 (CODE-layer)** 修复 src/tests 真实代码 bug 共 11 处含 1 处自我回归; **Rounds 7-10 (DESCRIPTION-layer)** 修复 .context 状态文件中的数字/归因错误共 6 处, 这些错误从 Round 6 worktree-save commit 5d24efd 起累积. Round 10 是 FINAL sealing round (见 LIM#9 "无限自检套娃风险防御") — 后续不再开新 self-check 轮次, 除非用户报告真实功能 bug.
 
 **各轮成果**:
 | Round | Commit | 必修数 | 关键发现 |
@@ -533,8 +533,12 @@
 | 4 | 0b83337 | 1 自我回归 | **Round 3 BUG#7 是错的!** read runner.py L142 才发现 _stage_entrypoint 已经 mark RUNNING, handler 重复 mark 是冗余调用 + 影响 progress ownership. 撤销 + 反向断言测试守护 |
 | 5 | 08a664a | 1 + LIM#8 | dead `_ = state` (Round 4 遗漏); 发现 runner.py Protocol docstring 与实现 drift (LIM#8 留 M2a kickoff 修, 不污染 M1.4 commit) |
 | 6 | 1285acd | 2 should-fix | 首次完整 read 被依赖模块 (Shot.__post_init__ + LocalWhisperProvider._postprocess_segments + ASRBase + integration test): 补 ValueError 注释三类业务规则 + ASR 空 sentences WARN; +2 正反单测 |
+| 7 (desc) | fb84ed3 | 3 desc | tests_net_added 31→33 (漏算 2 集成); chat.md L548 + changes.md L872 算术错 "5.6d/18%"→"6.5d/4%"; 8 项分解校验 |
+| 8 (desc) | 6b3065a | 2 desc | chat.md L499 vs L548 同文件 M1.8 工时 0.6d/0.8d 矛盾, 加 cross-ref bullet; state.json 加 actual_days_breakdown 字段 |
+| 9 (desc) | e8738c2 | 2 desc | actual_days_breakdown "Session 9 startup" 时序错 (ed0e0ff 是完工 worktree-save 不是 startup); lift commit 5d24efd 未点名, 加入 breakdown 字段 |
+| 10 (final) | &lt;this&gt; | 4 desc + LIM#9 | Round 7-9 描述层 commits 没回填 state.json self_check_rounds/commits + chat.md 标题/全景表; Round 10 一次性 sweep + 新增 LIM#9 "无限自检套娃防御" + 显式 sealed |
 
-**8 个 M1.8 commits 全景**: 7a74d10 (主实现) → ed0e0ff/faad1df (worktree-save 修正) → 936f217 (Round 1 self-check 记录) → fe38cbf → ba03849 → 0b83337 → 08a664a → 1285acd (HEAD).
+**12 个 M1.8 commits 全景** (Round 10 更新): 7a74d10 (主实现) → ed0e0ff/faad1df (worktree-save 修正) → 936f217 (Round 1 self-check 记录) → fe38cbf (R2) → ba03849 (R3) → 0b83337 (R4) → 08a664a (R5) → 1285acd (R6) → 5d24efd (Session 9 final worktree-save, lift actual_days 0.6→0.8) → fb84ed3 (R7 desc) → 6b3065a (R8 desc) → e8738c2 (R9 desc) → &lt;R10 desc&gt; (HEAD, FINAL).
 
 **3 个核心元教训** (沉淀到 state.json.previous_task.self_check_lessons_top3):
 1. **"called API ≠ knows contract"**: 必须 read 真实 RUNTIME 调用方实现, 不能只看自己写的代码或单测 (单测会 mock 掉 runtime path). Round 3→4 自我回归是这条教训的活案例

@@ -60,11 +60,12 @@
     "id": "M1.8",
     "title": "Index stage handler — shot detector + ASR + audio.wav cleanup (K9)",
     "completed_at": "2026-05-04T22:05:00+08:00",
-    "self_check_sealed_at": "2026-05-04T23:30:00+08:00",
+    "self_check_sealed_at": "2026-05-04T23:30:00+08:00 (code-layer Round 6 sealed) / 2026-05-04T23:55:00+08:00 (description-layer Round 10 final sealed, see LIM#9)",
     "commit_main": "7a74d10",
-    "commit_head": "1285acd",
-    "self_check_rounds": 6,
-    "self_check_commits": ["fe38cbf", "ba03849", "0b83337", "08a664a", "1285acd"],
+    "commit_head": "<post-round-10-commit>",
+    "self_check_rounds": 10,
+    "self_check_rounds_breakdown": "Rounds 1-6 are CODE-layer (fixed real bugs in src/tests, see chat.md L529-535 table). Rounds 7-10 are DESCRIPTION-layer (fixed numerical/attribution errors in .context state files themselves, accumulating from Round 6 worktree-save 5d24efd onwards). Round 10 is the FINAL sealing round per LIM#9 — no more self-check rounds will be opened on M1.8 unless user reports an actual functional bug",
+    "self_check_commits": ["fe38cbf (R2)", "ba03849 (R3)", "0b83337 (R4)", "08a664a (R5)", "1285acd (R6)", "fb84ed3 (R7 desc)", "6b3065a (R8 desc)", "e8738c2 (R9 desc)", "<R10 desc>"],
     "files_added": 3,
     "files_modified": 1,
     "lines_added": 847,
@@ -204,6 +205,15 @@
     "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
   },
   "tech_debt": {
+    "LIM_9_infinite_self_check_recursion_risk": {
+      "where": "process-level (not code-level), discovered in Rounds 7-10 of M1.8 self-check",
+      "issue": "After Round 6 sealed CODE-layer self-check, Rounds 7-9 each found NEW errors in the worktree-save commit just made by the previous round (description-layer cross-file inconsistencies in .context state files). Each round's fix introduces a new round-N+1's target — risk of infinite recursion at progressively smaller granularity (value → context → attribution → meta-description)",
+      "blast_radius": "TIME — each description-layer round costs ~5min but finds at most 2-3 cosmetic/attribution issues with zero functional impact. By Round 10 the marginal value is descriptive-only",
+      "fix": "Define a HARD STOP rule: when self-check rounds shift from finding code-bugs to finding only description-layer issues (numerical typos / attribution drift / cross-file phrasing inconsistency), declare SEALED at the next round and stop. New rounds may only be opened on (a) user reports actual functional bug or (b) downstream consumer breaks. State files are documentation, not specs — they describe the truth in git, they don't define it",
+      "fix_when": "ALREADY APPLIED at Round 10 of M1.8 self-check (this very lesson). Future milestones M2a+ inherit this rule",
+      "introduced_in": "Implicit in self-check methodology since M1.5; first explicitly observed Rounds 7-10 of M1.8",
+      "discovered_in": "Round 10 of M1.8 self-check (post-e8738c2)"
+    },
     "LIM_8_runner_protocol_docstring_drift": {
       "where": "src/autoclip/pipeline/runner.py L48-50",
       "issue": "StageHandler Protocol docstring says 'Handler must mark its own RUNNING and DONE/FAILED' but L142 _stage_entrypoint already calls mark_stage(stage, RUNNING, progress=0.0) BEFORE invoking handler. This caused M1.8 Round 3 BUG#7 (I added redundant mark_stage(RUNNING) in handler per docstring instruction).",
