@@ -1,0 +1,493 @@
+# Changes Log
+
+## 2026-05-04 (Session 1: Brainstorming + Design v0.1)
+
+### Created
+- `.gitignore`
+- `docs/plans/2026-05-04-autoclip-design.md` v0.1 — §1-§12 (1003 lines)
+- `.context/state.json` v0.1
+- `.context/design.md` v0.1
+- `.context/plan.md` (placeholder)
+- `.context/chat.md`
+- `.context/changes.md` (this file)
+
+### Initialized
+- Git repository (main branch)
+- Directory structure: `.context/`, `docs/plans/`
+
+### Decisions Locked (10 items)
+See `.context/state.json::decisions_locked` for full list.
+
+---
+
+## 2026-05-04 (Session 1 cont., adhoc revision: v0.1 → v0.2)
+
+### Trigger
+User asked: "有没有办法将生成结果放入到剪映里进行剪辑"
+
+### Investigation
+Web-searched and confirmed `pyJianYingDraft` (GitHub: GuanYixuan/pyJianYingDraft, PyPI: `pyjianyingdraft`) — a mature Python library for generating Jianying/CapCut draft files.
+
+### Adhoc Decision
+Switched product form from "self-built editor + FFmpeg mp4 output" to **"Jianying draft package output + minimal web status page"** (Option D).
+
+### Modified
+- `docs/plans/2026-05-04-autoclip-design.md` appended §13-§15 (1004-1419 lines):
+  - **§13** ADR revisions/additions:
+    - ADR-004 revised: ASR → Whisper API (no GPU)
+    - ADR-007 revised: Frontend → minimal web status page (no editor)
+    - ADR-008 new: Jianying draft integration via pyJianYingDraft
+  - **§14** Render module rewrite:
+    - 4-track Jianying draft structure (text / video / narration / original audio)
+    - M3-b implemented via per-segment volume (no FFmpeg sidechain needed)
+    - Render time: 3min → 30s (6-10x faster)
+  - **§15** Roadmap revision:
+    - S1 timeline: 4 weeks → 3 weeks (M3/M4 merged)
+    - Editor work removed entirely
+    - v2 plan removed Next.js editor (permanent cancellation)
+- `.context/state.json` updated to v0.2.0-design
+- `.context/design.md` updated to reflect v0.2 product form
+- `.context/changes.md` (this entry)
+
+### Key Architectural Impact
+| Item | v0.1 | v0.2 |
+|---|---|---|
+| Final output | mp4 file | Jianying draft package (.zip) |
+| Editor | Custom (1500-3000 LOC) | Removed (use Jianying) |
+| Render time | < 3 min | < 30 s |
+| MVP duration | 4 weeks | 3 weeks |
+| Frontend | Minimal web with editor | Status page only (4 templates) |
+| Audio mixing | FFmpeg sidechain ducking | Jianying per-segment volume |
+
+### Git Status (end of session)
+Uncommitted (per `250.md` rule, will not auto-commit; will not push). Pending user confirmation:
+- `.gitignore`
+- `docs/plans/2026-05-04-autoclip-design.md`
+- `.context/state.json`
+- `.context/design.md`
+- `.context/plan.md`
+- `.context/chat.md`
+- `.context/changes.md`
+
+### Not Yet Created (pending plan.md stage)
+- `src/` source code directory
+- `pyproject.toml` / `requirements.txt`
+- Any source code
+
+---
+
+## 2026-05-04 (Session 1 cont., adhoc revision: v0.2 → v0.3)
+
+### Trigger
+User asked for "multi-perspective review with 3 rounds of debate, then converge to consensus"
+
+### Process
+AI roleplayed 4 personas (Eve PM / Lin Algorithm / Rao Architecture / Wu Legal) for independent review, then 2 more rounds of cross-debate, finally converged to 12 revision items. User accepted all 12 items (Option A).
+
+### Modified
+- `docs/plans/2026-05-04-autoclip-design.md` appended §16-§20 (1420-2107 lines):
+  - **§16** P0 revisions (5 items, blocking):
+    - 16.1 ADR-004 re-revised: ASR → Aliyun ISR (Chinese WER better than Whisper)
+    - 16.2 ADR-006 revised: BackgroundTasks → multiprocessing + file state machine
+    - 16.3 §8.3 algorithm rewrite: narrative IR + post-validation
+    - 16.4 roadmap rewrite: 3 weeks → 5-6 weeks / 4 milestones (M1/M2a/M2b/M3/M4 + buffer)
+    - 16.5 zero-knowledge architecture (raw 24h delete, draft no original media)
+  - **§17** P1 revisions (5 items, parallel):
+    - 17.1 3 style presets + few-shot
+    - 17.2 AI self-evaluation + one-click regenerate
+    - 17.3 JsonTimelineExporter defensive implementation
+    - 17.4 data model unification: TimelineSegment intermediate layer
+    - 17.5 test pyramid (30+ unit, 5-8 integration, 1 e2e)
+  - **§18** P2 revisions (2 items, minimal):
+    - 18.1 user agreement v0.1 draft (separate file)
+    - 18.2 quantified 11-metric MVP KPI matrix
+  - **§19** v0.3 overview: full evolution table + decision matrix + roadmap + risks (R10-R14)
+  - **§20** document navigation
+- `.context/state.json` updated to v0.3.0-design (v0.3 revisions logged)
+- `.context/design.md` updated to reflect v0.3 product form
+- `docs/legal/user-agreement-v0.1.md` **NEW** (per §18.1 / P2-1)
+- `.context/changes.md` (this entry)
+
+### Key Architectural Impact (v0.2 → v0.3)
+| Item | v0.2 | v0.3 |
+|---|---|---|
+| MVP duration | 3 weeks | **5-6 weeks** |
+| ASR provider | OpenAI Whisper API | **Aliyun ISR** (Chinese specialized) |
+| Task executor | FastAPI BackgroundTasks | **multiprocessing + file state machine** |
+| Binding algorithm | Greedy by paragraph time range | **narrative IR + post-validation** |
+| Compliance | (not addressed) | **Zero-knowledge architecture** |
+| Style presets | 1 (plot_summary only) | **3** (plot_summary / humor_roast / serious_review) |
+| Quality assurance | (none) | **AI self-evaluation + one-click regenerate** |
+| Render fallback | (single point) | **JianyingDraftExporter + JsonTimelineExporter** |
+| Data model | ClipBinding (split concepts) | **TimelineSegment unified** |
+| Testing | (not mentioned) | **Pyramid (30+ unit, 5-8 integration, 1 e2e)** |
+| User agreement | (not mentioned) | **v0.1 draft + checkbox enforcement** |
+| Acceptance criteria | "looks ok" | **11 quantified KPIs** |
+
+### Git Status (end of session)
+Uncommitted (per `250.md` rule). Pending user confirmation:
+- All files in `.context/`
+- `docs/plans/2026-05-04-autoclip-design.md` (2107 lines)
+- `docs/legal/user-agreement-v0.1.md` (NEW)
+- `.gitignore`
+
+### Not Yet Created
+- `src/` source code directory
+- `pyproject.toml` / `requirements.txt`
+- `.context/plan.md` (will be generated next session)
+
+---
+
+## 2026-05-04 (Session 1 cont., adhoc revision: v0.3 → v0.4 plan restructure)
+
+### Trigger
+User feedback: "章节计划文档太大了，计划只需要做关键设计，别实现，交给后续代码开发来实现。我需要你把计划拆分成多个文档，然后通过一个总文档进行进度把控，执行时按照需求进行对应计划读取"
+
+### Adhoc-changes Classification
+- Type: documentation structure refactor + detail downgrade
+- Affects: plan.md only (no design.md decisions changed)
+- design.md v0.3 stays authoritative, no rollback
+
+### Modified
+- **DELETED** `docs/plans/2026-05-04-autoclip-plan.md` (old: 3847 lines with full impl code)
+- **CREATED** `docs/plans/2026-05-04-autoclip-plan.md` (new master: 220 lines, control doc only)
+- **CREATED** `docs/plans/tasks/` subdirectory
+- **CREATED** 5 milestone subdocs (key-design only, no impl code):
+  - `tasks/M1-infrastructure.md` (336 lines, 8 tasks)
+  - `tasks/M2a-scripting-main.md` (292 lines, 6 tasks)
+  - `tasks/M2b-scripting-robust.md` (282 lines, 5 tasks)
+  - `tasks/M3-render-web-compliance.md` (466 lines, 9 tasks)
+  - `tasks/M4-e2e-validation.md` (320 lines, 5 tasks)
+- **UPDATED** `.context/state.json` to v0.4.0-plan
+- **REWROTE** `.context/plan.md` (lightweight index, 68 lines)
+- **APPENDED** `.context/changes.md` (this entry)
+- **APPENDED** `.context/chat.md` (v0.4 restructure record)
+
+### Key Structural Impact (v0.3 plan→ v0.4 plan)
+| Aspect | v0.3 plan | v0.4 plan |
+|---|---|---|
+| File count | 1 | 1 master + 5 subdocs |
+| Total lines | 3847 | 1916 (220 + 1696) |
+| Reduction | — | -50% |
+| Per-task content | Full Python code + tests + git commands | Key design + file list + test strategy (no code) |
+| Loading pattern | Whole-file always loaded | On-demand per milestone |
+| Best for | Subagent execution as-is | Subagent reads master + relevant Mx-doc, writes code per situation |
+
+### Per-Task Template (v0.4)
+- Task ID + 标题
+- 目标（1 句话）
+- 关键设计决策（接口签名 / 数据结构 / 算法选择 / 关键约束）
+- 涉及文件（Create/Modify/Test 路径清单）
+- 测试策略（核心用例描述，不写测试代码）
+- 验收标准（可量化勾选）
+- 关联 KPI（design.md §18.2）
+- 依赖（前置/阻塞）
+- 预估工时
+
+### Master Doc Sections
+1. 文档拓扑
+2. 进度总览（5 milestones 状态表）
+3. 路线图与里程碑依赖（关键路径 + 并行机会）
+4. 验收 KPI 跟踪表（11 项，状态字段动态更新）
+5. 工程基线（项目结构 / 通用约定 / 环境变量）
+6. 执行导航规则（按需读取规则）
+7. 进度更新规则（何时更新本文件 / KPI 验证时机）
+8. 风险登记（5 项动态更新）
+9. 变更日志
+
+### Git Status (end of session)
+Uncommitted (per `250.md` rule). Pending user confirmation:
+- All `.context/` files updated
+- `docs/plans/2026-05-04-autoclip-plan.md` (NEW master, replaces deleted v0.3 version)
+- `docs/plans/tasks/*.md` (5 NEW files)
+- Existing: design.md / user-agreement / .gitignore unchanged
+
+### Not Yet Created
+- `src/` source code directory (next phase: executing-plans)
+- `pyproject.toml` (M1.1 task)
+
+---
+
+## 2026-05-04 (Session 2: executing-plans, M1.1 batch)
+
+### Phase Transition
+plan → **executing** (subagent-driven within session)
+
+### Pre-task: Documentation Baseline Commit
+- **Commit `f788ae5`** 📝docs: initial design and plan documents (v0.4)
+  - 10 files, 4205 insertions
+  - Files: .gitignore, docs/legal/user-agreement-v0.1.md, docs/plans/2026-05-04-autoclip-{design,plan}.md, docs/plans/tasks/{M1,M2a,M2b,M3,M4}*.md
+  - **Excluded**: .context/ (per 250.md hidden file rule)
+
+### Task M1.1: Project Scaffold + Poetry Deps + Settings + Test Baseline
+- **Commit `2d5fcce`** ✨feat: M1.1 project scaffold + Poetry deps + Settings + test baseline
+  - 11 files, 4570 insertions
+- **Files Created**:
+  - `pyproject.toml` (84 lines): Python `>=3.11,<3.14`, 19 deps, aliyun PyPI mirror as primary source
+  - `src/autoclip/__init__.py` (3 lines): version 0.1.0
+  - `src/autoclip/config.py` (80 lines): Pydantic Settings with all secrets as SecretStr
+  - `Makefile` (42 lines): install/test/test-unit/test-integration/lint/format/type-check/clean/run
+  - `.env.example` (25 lines): all required env vars documented with provider portal URLs
+  - `tests/unit/test_config.py` (60 lines, post-lint-fix): 4 test cases
+  - `tests/{__init__,unit/__init__,integration/__init__}.py`
+  - `README.md` (25 lines): quick start
+
+### Test Verification
+```
+4 passed in 0.15s
+- test_settings_loads_from_env PASSED
+- test_data_dir_auto_created PASSED
+- test_secrets_are_secret_str PASSED
+- test_max_concurrent_jobs_validation PASSED
+```
+
+### Lint Fixes (amended into M1.1 commit)
+- F401: removed unused `from pathlib import Path` in test_config.py
+- F841: removed unused variable assignment `settings = get_settings()` → `get_settings()`
+- ruff `All checks passed!` after fix
+
+### Infrastructure Baseline Locked
+- Python: 3.13.3 (constraint `>=3.11,<3.14`)
+- Poetry: 2.4.0 (installed via pipx 1.7.1)
+- PyPI mirror: aliyun (`https://mirrors.aliyun.com/pypi/simple/`) — primary source
+- Venv: `.venv/` in-project (gitignored)
+- Test: pytest 8.4.2 + pytest-cov 6.3.0 + pytest-asyncio 0.24.0
+- Lint: ruff 0.7.x
+- Types: mypy 1.13.x
+- Key deps verified import: fastapi 0.115.14, pydantic 2.13.3, pydantic-settings 2.14.0, sqlalchemy 2.0.49, dashscope, scenedetect 0.6.7.1, loguru 0.7.3
+
+### Issues Encountered & Resolved
+- **Issue 1**: `poetry install` 60s shell timeout × 3 retries
+  - Resolution: switch to user-manual install with aliyun mirror, agent waited for user confirmation
+- **Issue 2**: Initial install kill needed (cryptography stuck)
+  - Resolution: `pkill -9 -f poetry`, then user-manual completion
+- **Issue 3**: ruff lint failures (F401 + F841)
+  - Resolution: file_replace fix + pytest re-verify + `git commit --amend --no-edit` (kept history clean)
+
+### Pending for Next Session
+- M1.2: SQLAlchemy ORM models + db.py (1.0d)
+- M1.3: File state machine (state.json atomic R/W) (0.5d)
+- M1.4: PipelineRunner (multiprocessing) + FastAPI base routes (1.5d)
+- M1.5-M1.8: Provider/Ingest/Index implementation
+
+---
+
+## 2026-05-04 (Session 2 cont., M1.2+M1.3 batch)
+
+### Batch Strategy
+User chose "继续" → executed batch 2 (M1.2 ORM + M1.3 state machine in single batch since both are M1.4 prerequisites)
+
+### Task M1.2: SQLAlchemy ORM Models + DB Engine
+- **Commit `1c9bb0d`** ✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests
+  - 8 files, 649 insertions
+- **Files Created**:
+  - `src/autoclip/models/base.py` (25 lines): DeclarativeBase + created_at/updated_at server-managed timestamps
+  - `src/autoclip/models/video.py` (36 lines): Video model — zero-knowledge (filename_hash only, no abs path) — K10 schema-level enforcement
+  - `src/autoclip/models/job.py` (54 lines): Job + JobStatus SAEnum (pending/running/done/failed/cancelled), reserved fields agreement_accepted_at (M3.9) + regenerate_count (M4.4)
+  - `src/autoclip/models/shot.py` (56 lines): Shot + ASRSentence — order_idx + computed @property duration_sec
+  - `src/autoclip/models/timeline.py` (132 lines): Timeline + NarrationSentence + **TimelineSegment unified intermediate layer** (design.md §17.4) carrying BOTH source AND target time, plus BindingMethod enum (EVIDENCE / EVIDENCE_LOWCONFIDENCE / FALLBACK_UNIFORM); TYPE_CHECKING import for Shot to satisfy ruff F821
+  - `src/autoclip/models/__init__.py` (24 lines): public API surface; auto-imports all models for Base.metadata.create_all
+  - `src/autoclip/db.py` (113 lines): create_app_engine (file SQLite) + create_memory_engine (StaticPool for unit tests) + foreign_keys ON pragma via @event.listens_for + check_same_thread=False (multiprocessing) + session_scope contextmanager + init_db / drop_all
+  - `tests/unit/test_models.py` (205 lines): 7 cases — metadata create_all / Video↔Job cascade delete / TimelineSegment dual-time invariant + defaults / evidence_keywords JSON list[str] roundtrip / Shot.duration_sec @property / ASRSentence basic CRUD / Timeline uselist=False uniqueness
+
+### Task M1.3: File State Machine
+- **Commit `5454bda`** ✨feat: M1.3 file-based state machine for pipeline orchestration
+  - 3 files, 437 insertions
+- **Files Created**:
+  - `src/autoclip/pipeline/__init__.py` (10 lines): public API export (Stage / StageStatus / JobStateFile)
+  - `src/autoclip/pipeline/state.py` (213 lines): JobStateFile class — atomic write (tmp + os.fsync + os.replace POSIX guarantee per design.md §16.2) / StageState dataclass with started_at + finished_at timestamps / mark_stage with auto-progress=1.0 on DONE + auto started_at on RUNNING + progress clamping [0,1] / next_stage_to_run as resume primitive (returns earliest non-DONE; FAILED + RUNNING also re-execute candidates) / cancel signal via .cancel file (poll-based, no IPC) — request_cancel / is_cancelled / clear_cancel
+  - `tests/unit/test_state_machine.py` (215 lines): 11 cases — init creates 5 PENDING stages / no .tmp residue after mark / RUNNING+DONE timestamp lifecycle / progress clamp [0,1] / FAILED stores error / resume scenarios x4 (DONE skipped / FAILED rerun / all DONE returns None / fresh returns INGEST) / cancel signal full lifecycle / cross-instance persistence
+
+### Test Verification
+```
+22 passed in 0.27s
+- test_config.py        4 passed
+- test_models.py        7 passed
+- test_state_machine.py 11 passed
+```
+
+### Coverage (K8 baseline established)
+```
+TOTAL: 303 stmts / 21 miss / 93% coverage
+- config.py: 100%
+- models/*: 93-100%
+- pipeline/state.py: 100%
+- db.py: 63% (engine helpers exercised via tests indirectly; explicit tests deferred to M1.4)
+```
+
+### Lint Fixes (applied during verify, then re-tested before commit)
+- I001: import order in state.py + test_state_machine.py (auto-fixed by ruff --fix)
+- UP017: `datetime.timezone.utc` → `datetime.UTC` (auto-fixed; Python 3.11+ idiom)
+- F811: removed duplicate `Enum` import in timeline.py (auto-fixed)
+- F821: `Mapped["Shot"]` undefined → manual fix with `if TYPE_CHECKING: from .shot import Shot` (zero runtime cost, satisfies linter + IDE type inference)
+
+### Git Log
+```
+5454bda ✨feat: M1.3 file-based state machine for pipeline orchestration
+1c9bb0d ✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests
+2d5fcce ✨feat: M1.1 project scaffold + Poetry deps + Settings + test baseline
+f788ae5 📝docs: initial design and plan documents (v0.4)
+```
+
+### .gitignore Update
+Appended `.coverage` / `.coverage.*` / `htmlcov/` / `coverage.xml` (pytest-cov runtime artifacts)
+
+### Pending for Next Session/Batch
+- **M1.4** FastAPI app + PipelineRunner + multiprocessing (1.5d, ~recommend single-task batch due to complexity)
+- **M1.5** ASRProvider + AliyunASRProvider (1.0d, can parallelize with M1.6/M1.7 if needed)
+- **M1.6** Ingest Stage (FFmpeg normalize + audio extract) (1.0d)
+- **M1.7** Index Stage (PySceneDetect shot detection + ASR scheduling) (1.0d)
+- **M1.8** Index ASR integration + zero-knowledge cleanup of audio.wav (0.5d)
+
+---
+
+## 2026-05-04 (Session 3, M1.4 single-task batch)
+
+### Batch Strategy
+User chose "继续" → executed M1.4 as single-task batch (1.5d complexity: multiprocessing + FastAPI + spawn cross-process state). Confirmed correct call after debugging revealed cross-process subtlety.
+
+### Task M1.4: FastAPI app + PipelineRunner + multiprocessing
+- **Commit `71e5f07`** ✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing
+  - 9 files, 1273 insertions
+
+#### Files Created
+- `src/autoclip/pipeline/runner.py` (260 lines):
+  - `mp.set_start_method('spawn', force=True)` at module top — wrapped in `contextlib.suppress(RuntimeError)` for re-import safety
+  - `_STAGE_HANDLERS` global dict + `register_stage_handler()` / `get_stage_handler()` / `clear_stage_handlers()` API
+  - `_STAGE_MODULES` static tuple (M1.6+ stage modules added later)
+  - **`AUTOCLIP_EXTRA_STAGE_MODULES` env-var injection channel** (debug discovery: spawn subprocesses are fresh interpreters that re-import runner.py, so monkeypatch on module-level constants is INVISIBLE to children — env vars are the cross-process channel)
+  - `_load_stage_modules()`: imports both static + env-var-injected modules
+  - `_stage_entrypoint(stage_name, job_dir_str)`: subprocess entry — re-imports modules, marks RUNNING, calls handler, marks DONE on success / FAILED + `sys.exit(1)` on exception / `sys.exit(2)` if no handler
+  - `PipelineRunner.run(resume=True)`: scheduler loop — cancel check → `next_stage_to_run` → `_spawn_stage` → repeat; clears stale `.cancel` at start
+  - `_spawn_stage`: defensive double-check (`exitcode != 0` OR `status != DONE` → mark FAILED with diagnostic message)
+- `src/autoclip/main.py` (81 lines):
+  - `lifespan` async context: `ensure_data_dir()` → `create_app_engine()` → `init_db()` → `make_session_factory()` → mounted on `app.state` (engine / session_factory / settings)
+  - `create_app()` factory: `GET /health` → `{"status":"ok","version":__version__}` + `app.include_router(jobs_router, prefix="/api")`
+  - module-level `app = create_app()` for `uvicorn autoclip.main:app`
+- `src/autoclip/api/__init__.py` (5 lines): exports `jobs_router`
+- `src/autoclip/api/jobs.py` (276 lines): 4 endpoints
+  - `POST /api/jobs` (201): multipart upload + form fields (target_duration_sec / style_preset / agreement_accepted) → bootstrap Video/Job rows → stream-write source.mp4 to `data/jobs/{job_id}/source.mp4` with sha256 hash → dedup Video by hash (replace bootstrap with existing if found) → `JobStateFile.init_state()` → detached `mp.Process(_run_pipeline_in_subprocess)` → return `{job_id, video_id, status:"pending", size_bytes, file_hash}`
+  - `GET /api/jobs` (200): newest-first list with limit/offset
+  - `GET /api/jobs/{id}` (200): DB summary + state.json content (or `null` if state.json missing)
+  - `POST /api/jobs/{id}/cancel` (202): touch `.cancel` signal; 409 if state.json missing; 404 if job missing
+- `tests/unit/test_runner.py` (360 lines, 11 cases): handler registry / `_stage_entrypoint` 4 paths (success / exception → FAILED+exit1 / no-handler → FAILED+exit2 / explicit-DONE preserved) / scheduling 7 paths (5-stages-in-order with FakeProcess / resume skips DONE / resume=False reruns all / abort on FAILED stops subsequent / cancel between stages → PipelineRunnerError / silent-handler with exit 0 → defensive FAILED / SIGKILL exit 137 → FAILED with diagnostic / missing state.json → PipelineRunnerError / clear stale .cancel at start)
+- `tests/integration/test_pipeline_resume.py` (110 lines, 3 cases): REAL spawn subprocesses with fake handlers via env-var injection — full 5-stage run all markers exist + resume skips 3 DONE only 2 markers + resume reruns FAILED stage with marker present (K7 main path validation)
+- `tests/integration/test_api_e2e.py` (161 lines, 7 cases): FastAPI TestClient — health 200 / upload+dispatch+source.mp4 written / GET returns DB+state with stages / 404 unknown / list newest-first / cancel writes signal 202 / cancel 404 unknown
+- `tests/integration/_fixtures/__init__.py` + `fake_stage_handlers.py` (25 lines): top-level functions importable from spawn subprocesses; auto-registers 5 fake handlers at module import (writes marker file + marks DONE)
+
+#### Test Verification
+```
+46 passed in 1.69s
+- test_config.py        4 passed (M1.1)
+- test_models.py        7 passed (M1.2)
+- test_state_machine.py 11 passed (M1.3)
+- test_runner.py        11 passed (M1.4 unit)
+- test_pipeline_resume.py 3 passed (M1.4 integration K7)
+- test_api_e2e.py       7 passed (M1.4 integration API)
+```
+
+#### Coverage (K8 elevated to 96%)
+```
+TOTAL: 538 stmts / 24 miss / 96% coverage (was 93% before M1.4)
+- main.py: 100%
+- pipeline/runner.py: 96%
+- pipeline/state.py: 100%
+- api/jobs.py: 88% (multipart edge cases + 409 path uncovered)
+- db.py: 98% (was 63% — integration tests fully exercised engine)
+```
+
+#### Live Server Validation
+```
+poetry run uvicorn autoclip.main:app --host 127.0.0.1 --port 18765 (background)
+GET /health     → {"status":"ok","version":"0.1.0"}     [HTTP 200]
+GET /api/jobs   → {"items":[],"limit":50,"offset":0,"count":0}  [HTTP 200]
+lifespan startup + shutdown logs clean (init_db succeeded, no errors)
+```
+
+#### Critical Bug Fixed During Verify
+- **Bug**: 3 integration tests failed `assert result == StageStatus.DONE` (got FAILED)
+- **Root Cause**: `monkeypatch.setattr(runner_mod, '_STAGE_MODULES', (...))` set the module constant in the parent process; spawn subprocesses re-import `runner.py` and see the original empty tuple, so handlers never register → `_stage_entrypoint` falls through "No handler registered" → exit 2 → parent marks FAILED
+- **Fix**: Introduced `AUTOCLIP_EXTRA_STAGE_MODULES` environment variable channel (env vars survive spawn boundary). Tests changed from `monkeypatch.setattr` to `monkeypatch.setenv`. Production code path unchanged (just added env var fallback in `_load_stage_modules`)
+- **Lesson Locked**: anything that needs to cross the spawn process boundary must use env vars / files / args — module monkeypatch is invisible
+
+#### Lint Fixes
+- SIM105: `try/except: pass` → `contextlib.suppress(RuntimeError)` in runner.py
+- F841: removed unused `state = JobStateFile(job_dir)` in test_runner.py cancel test
+
+#### Decisions Locked
+- **Q1 (test isolation)**: unit tests mock `mp.Process` with FakeProcess class; integration tests use REAL spawn subprocesses with env-var-injected fake handler module
+- **Q2 (zero-knowledge §16.5)**: source.mp4 path is NOT stored in state.json; subprocess derives it from convention `data/jobs/{job_id}/source.mp4`
+- **Q3 (cancel granularity)**: PipelineRunner checks `.cancel` BETWEEN stages only; in-stage cancel polling is the handler's responsibility (per stage handlers M1.6+)
+
+### Git Log (cumulative)
+```
+71e5f07 ✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing
+4c49a44 🚧 chore: gitignore coverage artifacts
+5454bda ✨feat: M1.3 file-based state machine for pipeline orchestration
+1c9bb0d ✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests
+2d5fcce ✨feat: M1.1 project scaffold + Poetry deps + Settings + test baseline
+f788ae5 📝docs: initial design and plan documents (v0.4)
+```
+
+### Pending for Next Session/Batch
+- **M1.5** ASRProvider + AliyunASRProvider (1.0d, recommend single-task; needs Aliyun credentials for integration — most testing will be unit/mock)
+- **M1.6** Ingest Stage (FFmpeg normalize + audio extract) (1.0d) — first concrete stage handler, uncommnent `_STAGE_MODULES` entry
+- **M1.7** Index Stage (PySceneDetect shot detection) (1.0d)
+- **M1.8** Index↔ASR integration + zero-knowledge cleanup of audio.wav (0.5d)
+
+---
+
+## 2026-05-04 (Session 4: adhoc - 本地化 ASR + LLM 角色推断)
+
+### Trigger
+User in pre-M1.5 phase: 
+1. "阿里云asr转写还需要上传oss，太麻烦了，我需要本地方案"
+2. "再mvp阶段我需要实现角色声纹判断"
+
+### Brainstorming convergence (chat.md Session 4)
+- Q1 角色识别目的 → A: 让 LLM 知道 A/B 角色对话 (提升解说稿质量)
+- Q2 路径选择 → 路径2: LLM 文本推断 (不做声纹)
+- Q3 ASR 本地选型 → faster-whisper + large-v3
+
+### Design changes
+- **ADR-004 三度修订** (design.md Part IV §21.1): AliyunASRProvider → LocalWhisperProvider
+  - 移除 OSS 上传/SubmitTask/轮询/DELETE 5 步流水线
+  - 改为 faster-whisper + large-v3 + VAD + 模型单例
+  - K9 简化: OSS cleanup → 本地 audio.wav cleanup (音频从未离开本地)
+- **ADR-009 新增** (design.md Part IV §22): MVP 角色信息走 LLM 文本推断
+  - PlotOutline.main_characters: list[str] → list[Character{role,name?,description}]
+  - KeyAct 新增 involved_characters: list[str]
+  - plot_summary 风格预设强制使用角色称呼替代"有人"/"某人"
+  - ASRSentence.speaker 字段保持 None (schema 一次到位, 未来 v1.1 加声纹)
+- **§8.2.2 ASR 子模块** (Part IV §21.2): 改写为本地伪代码
+- **新增风险**: R15 (whisper 权重首次下载) / R16 (LLM 角色推断错误) / R17 (低配 Mac 内存)
+- **R2 解除**: 阿里云 ASR 限速风险 (不再适用)
+- **工期**: M1.5 由 1d → 0.5d, 总工期 -0.5d
+
+### Modified files
+**Docs (6)**:
+- `docs/plans/2026-05-04-autoclip-design.md` (+175 lines, Part IV §21-§23 追加)
+- `docs/plans/2026-05-04-autoclip-plan.md` (env section + R2 解除 + R15/R16/R17 新增 + changelog)
+- `docs/plans/tasks/M1-infrastructure.md` (M1.5 任务整体重写; 工时表更新; M1.8 引用更新)
+- `docs/plans/tasks/M2a-scripting-main.md` (M2a.2 + M2a.3 prompt 增强, 角色推断专家定位)
+- `.context/design.md` (索引 v0.3 → v0.4, 关键技术栈表 + 角色识别行)
+- `.context/plan.md` (executing 阶段标记 + v0.4 子文档变更摘要)
+
+**Code (4)**:
+- `src/autoclip/config.py` (-aliyun_asr_app_key, -aliyun_asr_token; +whisper_model_size, +whisper_device, +whisper_compute_type)
+- `.env.example` (-ALIYUN_ASR_*; +WHISPER_*)
+- `tests/unit/test_config.py` (断言重构; +test_whisper_defaults; +test_no_legacy_aliyun_asr_fields)
+- `pyproject.toml` (-alibabacloud-nls-python-sdk = "^1.0.2"; +faster-whisper = "^1.0.0")
+
+**Context state (2)**:
+- `.context/state.json` (v0.4.4 → v0.4.5; next_task M1.5 重写; v04_adhoc_summary 新增)
+- `.context/changes.md` (本条目)
+
+### Schema unchanged
+- `models.shot.ASRSentence.speaker: Mapped[str | None]` (字段保留, MVP 永远 None)
+- `ASRProvider.transcribe(audio_path, language) -> ASRResult` (接口签名不变, 仅替换实现)
+- 数据流时间戳对齐机制 (Shot/ASRSentence/Timeline 仍只靠 sec 对齐)
+
+### Pending verification (todo #12)
+- 跑 pytest 确认 config 改动后所有测试通过
+- 预期: 46 → 48 测试 (新增 test_whisper_defaults + test_no_legacy_aliyun_asr_fields)
