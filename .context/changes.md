@@ -869,7 +869,9 @@ User in pre-M1.5 phase:
 - **LIM#7** (M3): mark_stage(progress=...) 是 set 不是 monotonic update, 任意调用方都能"回退"进度. M3 加 monotonic guard
 - **LIM#8** (M2a kickoff): runner.py L48-50 StageHandler Protocol docstring 与 L142 _stage_entrypoint 实现 drift. 必须在 M2a kickoff 前修, 否则下一个 handler 作者会重蹈 Round 3 BUG#7 覆辙
 
-**M1 milestone 终态**: 8/8 任务全完成, 总工时实际 ~5.6d vs 估算 6.8d (提前 18%), 测试 0 → 187. 下一步: M2a kickoff 前先修 LIM#8 (0.05d) → M1 e2e 人工验收 (0.2d) → M2a Scripting (5d).
+**M1 milestone 终态**: 8/8 任务全完成, 总工时实际 6.5d vs 估算 6.8d (**提前 ~4%**), 测试 0 → 187. 下一步: M2a kickoff 前先修 LIM#8 (0.05d) → M1 e2e 人工验收 (0.2d) → M2a Scripting (5d).
+
+> **Round 7 算术校正注**: 本节原写 "5.6d 提前 18%" 是错的 (Round 6 worktree-save 我按"M1.7 完工时 5.4d + M1.8 0.2d self-check"凑出 5.6d, 完全没算 M1.8 主体的 0.6d, 也没参考 L701 老分解). Round 7 用 changes.md L701 的 8 项分解 + state.json M1.8 actual_days=0.8 重算: 0.5 + 1.0 + 0.5 + 1.5 + 0.5 + 1.3 + 0.4 + 0.8 = **6.5d**. vs 6.8d 估算 = 提前 0.3d ≈ 4%. 同时 L701 自身的 5.4d 也是错的 (8 项相加 6.3d, M1.8 只填了 0.6d 没含 self-check), 但 L701 是 Round 1 已 commit 的历史不能改, 在 Round 7 commit 中明确标注校正. 教训: **算术也算"假设实现"** — 写"5.6d / 18%"时我没真的把 8 个 milestone 数字加一遍, 凭对老数据的模糊记忆凑数. 多步算术必须像测试一样每步 verify, 不能跳步.
 
 **写给未来自己的话** (压缩后续 session 上下文时优先保留):
 > M1.8 6 轮 self-check 的核心结论不是"找到了多少 bug", 而是**"用户为什么要追问 5 次"**. 答案: 我每轮都自信"已经检查干净了", 但真正干净的标准不是"找不到 bug 了", 而是**"已经把 scope 扩展到所有相关代码 (含依赖模块) + 完整 read + dry-run 实测"**. Round 1-5 都没做到第三条 (Round 3→4 还反向引入了 BUG#10). Round 6 终于做到了. 后续每个 milestone 完成时, 不等用户问就主动按这个 checklist 自查一遍, 才是"提前完成"的真正含义.

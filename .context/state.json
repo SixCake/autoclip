@@ -69,7 +69,8 @@
     "files_modified": 1,
     "lines_added": 847,
     "lines_deleted": 1,
-    "tests_net_added": 31,
+    "tests_net_added": 33,
+    "tests_net_added_breakdown": "31 unit (test_index_handler.py) + 2 integration (test_index.py, default-skip)",
     "integration_tests_added": 2,
     "actual_days": 0.8,
     "key_implementation_notes": [
