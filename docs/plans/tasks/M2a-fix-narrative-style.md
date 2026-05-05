@@ -103,7 +103,7 @@
 
 ---
 
-## 任务清单（5 个，6.7d）
+## 任务清单（5 个，6.6d）
 
 ### M2a-fix.1 — 设计规约 + 数据契约 + KPI 测量框架（Day 0, 1.1d）
 
@@ -183,6 +183,7 @@
 - [ ] PresetRegistry 自动识别测试通过（加 1 个 stub preset 文件 → registry 自动 list 出来）
 - [ ] 全套 pytest 净增 ≥ 8 用例全绿
 - [ ] commit 后用户找 3-5 朋友盲测 before.json vs after.json，多数判定"after 更好"（K-style-4 sanity）
+- [ ] **Optional → required 迁移规约（v0.7.1 P0 补强）**：本 task 加的 3 个 Optional 字段（`genre_inference` / `tone_recommendation` / `narrative_intent`），M2a-fix.4 schema bump 升 required 时统一映射 `None → ''`（空字符串），不写专门 migration test；Pydantic schema 加 `default=''` 即可
 
 **关联 KPI**: K-style-1（hard gate）/ K-style-4（sanity） / K8
 **依赖**: M2a-fix.1 → **阻塞**: M2a-fix.3-5
@@ -270,7 +271,7 @@
 
 ---
 
-### M2a-fix.5 — M2b-light（narrative_intent 路由绑定）+ Day 5 batch judge + M2b-full 决策（Day 4-5, 2.1d）
+### M2a-fix.5 — M2b-light（narrative_intent 路由绑定）+ Day 5 batch judge + M2b-full 决策（Day 4-5, 2.0d）
 
 **目标**: 启动 M2b-light（基于 `narrative_intent` 字段路由 3 种绑定策略），跑 3-5 部真实视频，用 batch LLM-as-judge 评估 K-style-2/3，最终输出 M2b-full "做" 或 "不做" 的决策报告。
 
@@ -294,11 +295,11 @@
 - **judge 落盘**: `{job_dir}/judge_reports/style_eval_{timestamp}.json`，与 timeline.json 同级，方便人工抽样核对
 - **M2b-full 决策报告**: 生成 `reports/M2b-full-decision.md`，含:
   - K-style-2/3 在 3-5 部视频的统计结果
-  - K1/K2/K3（如有数据）当前水平
+  - M2b-light 路由命中率（核心启动指标）+ K1/K2/K3 在 M2a-fix 阶段无正式测量，记入 "未来 M2b-full 实施时补测"
   - 是否启动 M2b-full 的明确建议（含 4d 工时是否值得的 ROI 分析）
-- **M2b-full 启动条件**（design.md §17.5 显式定义）:
-  - 启动: K1 < 50% 且业务方明确要求精确绑定（如 M3 Render 阶段反馈"画面对不上严重影响产品"）
-  - 不启动: K1 ≥ 50% 或 narrative_intent 路由已能覆盖 80%+ 用例
+- **M2b-full 启动条件**（design.md §17.5 显式定义；v0.7.1 P0 补强：K1 在 M2a-fix 阶段无测量数据，改用本里程碑可测指标）:
+  - 启动: **M2b-light 路由命中率 < 80%** 或 **K-style-4 盲测胜率 < 60%**，且业务方明确要求精确绑定（如 M3 Render 阶段反馈"画面对不上严重影响产品"）
+  - 不启动: M2b-light 路由命中率 ≥ 80% 且 K-style-4 盲测胜率 ≥ 60%（narrative_intent 路由已能覆盖主要场景）
 
 **涉及文件**:
 - Create: `src/autoclip/algo/intent_routed_binder.py`
@@ -317,7 +318,7 @@
 
 **关联 KPI**: K-style-2 / K-style-3 / K1（部分） / K8
 **依赖**: M2a-fix.4 → **阻塞**: M2b-full（如启动）/ M3 全部
-**预估工时**: **2.1d**（M2b-light 实现 1.0d + batch judge 0.5d + 3-5 部跑通 + 评估 + 决策报告 0.6d）
+**预估工时**: **2.0d**（M2b-light 实现 1.0d + batch judge 0.5d + 3-5 部跑通 + 评估 + 决策报告 0.5d）
 
 ---
 
@@ -329,10 +330,10 @@
 | M2a-fix.2 架构骨架 + movie_summary + 两阶段 LLM | 1.5d | Day 1 |
 | M2a-fix.3 扩展 shortdrama_推流 + anime_情绪 + 对比 | 1.0d | Day 2 |
 | M2a-fix.4 CLI + 双 schema bump + 缓存 + K6=90s | 1.0d | Day 3 |
-| M2a-fix.5 M2b-light + batch judge + M2b-full 决策 | 2.1d | Day 4-5 |
-| **合计** | **6.7d** | **5-6 工作日** |
+| M2a-fix.5 M2b-light + batch judge + M2b-full 决策 | 2.0d | Day 4-5 |
+| **合计** | **6.6d** | **5-6 工作日** |
 
-vs 原 brainstorming 收敛后估算 5.7d，**+1.0d 来自 8 角度 critique 的 19 项 P0 修正**（详见上方 critique 表）。
+vs 原 brainstorming 收敛后估算 5.7d，**+0.9d 来自 8 角度 critique 的 19 项 P0 修正**（详见上方 critique 表）。
 
 ---
 

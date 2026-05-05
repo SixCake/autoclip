@@ -1267,3 +1267,30 @@ Session 20 完成 brainstorming Q1-Q8 + 8 角度 19 项 P0 修正共识后，用
 
 ### 下一步
 进入 Day 0 = M2a-fix.1（设计规约 + 数据契约 + KPI 测量框架，1.1d）的实施阶段。
+
+---
+
+## Session 22 — v0.7.1 P0 补强（YAGNI 砍后落盘，2026-05-05 续）
+
+### 触发
+Session 21 commit 后用户要求"通读自检 acceptance criteria"。我输出 13 项补强清单 → 用户引 YAGNI/KISS 反问"是否需要推进" → 我自我批评后砍到 3 项 P0 → 用户选 (B) 只补 3 项 P0。
+
+### 实施
+**3 项 P0 补强**（M2a-fix-doc + plan.md + .context 三件套同步，0 src/ 改动）:
+- P0-#1 (M2a-fix.2): Optional → required 字段迁移规约（"None → '' default" 1 行）
+- P0-#2 (M2a-fix.5): 工时 2.1d → 2.0d 同步 5 处（合计 6.7d → 6.6d）
+- P0-#3 (M2a-fix.5): M2b-full 启动条件 "K1 < 50%" → "M2b-light 路由命中率 < 80% 或 K-style-4 盲测胜率 < 60%"（本里程碑可测）
+
+### 修订规模
+- M2a-fix-narrative-style.md +2 行（372 → 374 行）
+- plan.md 主控: 4 处 6.7→6.6 / +6.7d→+6.6d / 38.5d→38.4d
+- .context/state.json: 4 处同步
+- .context/plan.md: 1 行索引
+
+### 元教训
+1. **YAGNI 砍刀的价值**: 13 项补强 → 砍 77% → 剩 3 项才是真问题（决策无据 / 加载失败 / 估算精度）
+2. **senior 视角自我批评**: 之前的 13 项约 60% 是 over-engineering（KPI tracker JSON / pricing_version / rollback 矩阵 / drift 检测都是企业级团队工具，不适合 1 人 5 天小项目）
+3. **保留 P1 不实施**: 4 项 P1（style_violations 误杀测试 / 盲测软门禁 / R1-R6 token 断言 / plot_summary.py 删除时机）都是 1-3 行级 inline 修订，可以在 Day 0 design.md 编写时自然处理
+
+### 下一步
+v0.7.1 P0 补强完毕，进入 Day 0 = M2a-fix.1 设计规约实施。

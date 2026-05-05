@@ -5,7 +5,7 @@
 > 子文档（按需读取）：
 > - M1 `../docs/plans/tasks/M1-infrastructure.md`（8 任务，354 行）
 > - M2a `../docs/plans/tasks/M2a-scripting-main.md`（6 任务，491 行）
-> - **M2a-fix `../docs/plans/tasks/M2a-fix-narrative-style.md`（5 任务，372 行；v0.7 新增，6.7d，含 Q1-Q8 + 19 项 P0 修正）**
+> - **M2a-fix `../docs/plans/tasks/M2a-fix-narrative-style.md`（5 任务，374 行；v0.7+v0.7.1 新增，6.6d，含 Q1-Q8 + 19 项 P0 修正 + 3 项 P0 补强）**
 > - M2b `../docs/plans/tasks/M2b-scripting-robust.md`（v0.7 拆分后仅条件启动，0/4d；M2b-light 已并入 M2a-fix.5）
 > - M3 `../docs/plans/tasks/M3-render-web-compliance.md`（9 任务，466 行）
 > - M4 `../docs/plans/tasks/M4-e2e-validation.md`（5 任务，320 行）

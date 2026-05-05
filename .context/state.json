@@ -2,7 +2,7 @@
   "project": "autoclip",
   "version": "0.10.0-executing",
   "stage": "executing",
-  "phase": "M2a-fix 里程碑 doc-only 落盘 COMPLETE (Session 20 续 + 8 角度 critique 19 项 P0 修正); plan.md v0.7 / M2a-fix-narrative-style.md 372 行 / M2b 头部 v0.7 修订提示已加 / .context 三件套同步; ready for Day 0 = M2a-fix.1 设计规约启动",
+  "phase": "M2a-fix 里程碑 doc-only 落盘 COMPLETE (Session 20 续 + 8 角度 critique 19 项 P0 修正); plan.md v0.7 / M2a-fix-narrative-style.md 372 行 / M2b 头部 v0.7 修订提示已加 / .context 三件套同步; ready for Day 0 = M2a-fix.1 设计规约启动; v0.7.1 P0 补强 (3 项 YAGNI 砍后修订: Optional→required 迁移 / 2.1d→2.0d / M2b-full 启动条件改用 M2a-fix 可测指标) 已落到 M2a-fix-doc + plan.md + state.json",
   "current_focus": "M2a-fix.1 (Day 0, 1.1d): design.md §17.5 两阶段 LLM 章节 + §17.6 UX 4 意图按钮规约 + 三层封闭枚举集 + fallback 矩阵 + 静态默认三元组 + src/autoclip/algo/style_violations.py R1-R6 正则扫描器 (Day 1 hard gate)",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
@@ -65,20 +65,21 @@
     },
     "M2a-fix": {
       "path": "docs/plans/tasks/M2a-fix-narrative-style.md",
-      "lines": 372,
+      "lines": 374,
       "tasks": 5,
-      "estimate_days": 6.7,
+      "estimate_days": 6.6,
       "status": "pending (Day 0 待启动)",
       "tasks_list": [
         "M2a-fix.1 设计规约+数据契约+KPI框架 (1.1d)",
         "M2a-fix.2 架构骨架+movie_summary+两阶段LLM (1.5d)",
         "M2a-fix.3 扩展 shortdrama_推流+anime_情绪 (1d)",
         "M2a-fix.4 CLI+双 schema bump+缓存 (1d)",
-        "M2a-fix.5 M2b-light+batch judge+M2b-full 决策 (2.1d)"
+        "M2a-fix.5 M2b-light+batch judge+M2b-full 决策 (2.0d)"
       ],
       "p0_corrections_count": 19,
       "p0_corrections_breakdown": "数据契约 5 (C1-C5) + KPI 测量 4 (K-style-1/2/3/4) + 成本性能 3 (P1-P3) + 容错 3 (F1-F3) + UX 架构 4 (U1/U2/A1/A2)",
-      "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识"
+      "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识",
+      "subtasks": []
     }
   },
   "total_tasks": 34,
@@ -123,7 +124,7 @@
     "title": "M2a 二创风格修正 + M2b-light kickoff",
     "subdoc": "docs/plans/tasks/M2a-fix-narrative-style.md",
     "tasks": 5,
-    "estimate_days": 6.7,
+    "estimate_days": 6.6,
     "depends_on": "M2a 已完成 (commit e883433)",
     "p0_corrections": 19,
     "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识"

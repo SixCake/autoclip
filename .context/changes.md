@@ -1654,3 +1654,66 @@ Day 0：写 M2a 二创风格修正设计规约（已固化为 todo list 10 项�
 
 ### 下一步
 进入 Day 0 = M2a-fix.1 设计规约实施阶段。
+
+---
+
+## Session 22 — v0.7.1 P0 补强（YAGNI 砍后 3 项落盘，2026-05-05 续）
+
+### 触发
+Session 21 完成 M2a-fix doc 落盘 + commit 后，用户要求"通读自检 acceptance criteria 是否需要补强"。我先输出 13 项补强清单（4 P0 + 9 P1 + 4 P2），用户引 YAGNI/KISS 原则反问"是否需要推进"。我用 senior 视角自我批评后，13 → 7 项（P0 由 4 缩到 3，P1 由 9 缩到 4，P2 全砍）。用户选 (B) 只补 3 项 P0。
+
+### 3 项 P0 补强（YAGNI 砍后最终版）
+
+#### P0-#1 (M2a-fix.2 #4): Optional → required 字段迁移规约
+- **问题**: M2a-fix.2 加 3 个 Optional 字段（genre_inference / tone_recommendation / narrative_intent），M2a-fix.4 升 required 时，.2/.3 阶段产出的 timeline.json 字段为 None 会断 Pydantic 加载
+- **修订位置**: M2a-fix.2 验收标准末尾加 1 行
+- **解决方案** (YAGNI 砍后): "统一映射 None → ''，不写专门 migration test，Pydantic schema 加 default='' 即可"
+- **砍前 over-engineering 版**: "加专门 migration test 验证向后兼容"
+
+#### P0-#2 (M2a-fix.5 #5): 工时校正 2.1d → 2.0d
+- **问题**: 2.1d 标注 vs 实际 Day 4 + Day 5 = 2 工作日，存在 0.1d 隐式 buffer，估算精度问题
+- **修订位置**: M2a-fix.5 任务标题 + 工时分解 + 工时汇总表 + plan.md 主控 + .context/state.json 共 5 处
+- **解决方案** (YAGNI 砍后): 直接 2.1d → 2.0d (decision report 0.6d → 0.5d)，影响合计 6.7d → 6.6d / +6.7d → +6.6d / 31.8→38.4d
+
+#### P0-#3 (M2a-fix.5 #6): M2b-full 启动条件改用本里程碑可测指标
+- **问题**: 启动条件原写 "K1 < 50%"，但 K1 是 M2b 时代的绑定 KPI，M2a-fix 阶段 batch judge 不测 K1 → 决策报告无据可依
+- **修订位置**: M2a-fix.5 关键设计决策 "M2b-full 启动条件" 段 + 决策报告 ROI 章节 K1 引用
+- **解决方案** (YAGNI 砍后): 启动条件改 "M2b-light 路由命中率 < 80% 或 K-style-4 盲测胜率 < 60%"（本里程碑可测）；决策报告里 K1/K2/K3 标注"无正式测量，记入未来 M2b-full 实施时补测"
+
+### YAGNI 砍后清单（13 → 3）
+
+**砍掉的 P0**:
+- ~~.4#4 cost_summary pricing_version 字段~~ (5 天后完工，speculative)
+- ~~G1 整体 rollback plan~~ (MR1-MR6 风险表已覆盖 80%，rollback 操作就是 git revert)
+
+**砍掉的 P1（9 项中 5 项）**:
+- ~~.1#2 "其他"枚举值的语义边界~~ (跑出来才知道滥用频率)
+- ~~.3#1 "风格明显不同"量化~~ (肉眼判断够用，过度形式化)
+- ~~.4#1 schema_version 字段~~ (M3 真要 bump 时 5 分钟加，speculative)
+- ~~.4#2 缓存并发安全~~ (明确单 job 串行，1 句话标注 scope 即可)
+- ~~G2 KPI tracker JSON~~ (5 天小项目，commit message 是天然 tracker)
+- ~~G3 design.md vs 实现 drift 检测~~ (1 人 5 天项目用 grep 够用)
+
+**保留的 P1（4 项）但本轮未实施**: .1#1 (style_violations 误杀测试) / .2#1 (盲测软门禁) / .2#2 (R1-R6 注入 prompt token 回归断言) / .2#3 (plot_summary.py 删除时机)
+- 决策依据: 都是 1-3 行级 inline 修订，可以在 Day 0 design.md 编写时自然处理，不需要现在改 task doc
+
+**全砍的 P2 (4 项)**: 按 YAGNI 0 容忍
+
+### 修订规模
+- M2a-fix-narrative-style.md: +2 行净增（372 → 374 行）
+- plan.md 主控: 4 处 6.7→6.6 同步
+- .context/state.json: 3 处（plan_subdocs.estimate_days / tasks_list[4] / active_milestone.estimate_days）+ phase 加 v0.7.1 注脚
+- .context/plan.md: 1 行索引同步
+
+### Commit
+- 0 src/ 改动；纯 doc-only P0 补强
+- HEAD 推进 1 commit (📝docs : v0.7.1 P0 补强)
+- 工时影响: 6.7d → 6.6d (净减 0.1d，纯精度校正)
+
+### 元教训
+- **senior 视角的 YAGNI 砍刀价值**: 自检 13 项 → 砍 10 项 (77%)，剩余 3 项才是 "不写到文档明天就出问题" 的硬缺口
+- **"补强建议"和"实施补强"是两件事**: P1 4 项保留作为 Day 0 时的 inline 待办，不预先膨胀文档
+- **decision rationale 必须基于本里程碑可测指标**: P0-#3 是典型的"决策依据闭环"问题，K1 在 M2a-fix 阶段无数据等于决策无据
+
+### 下一步
+v0.7.1 P0 补强完毕，进入 Day 0 = M2a-fix.1 设计规约实施阶段（含 Day 0 design.md 编写时 inline 处理 4 项保留的 P1）。
