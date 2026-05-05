@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}AutoClip{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav class="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6">
+    <a href="/" class="text-lg font-bold text-indigo-600">✂️ AutoClip</a>
+    <a href="/" class="text-sm text-gray-600 hover:text-indigo-600">上传</a>
+    <a href="/jobs" class="text-sm text-gray-600 hover:text-indigo-600">任务列表</a>
+  </nav>
+  <main class="max-w-4xl mx-auto px-4 py-8">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

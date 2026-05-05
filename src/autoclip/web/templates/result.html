@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+{% block title %}任务 #{{ job_id }} 结果 — AutoClip{% endblock %}
+{% block content %}
+<div class="flex items-center gap-3 mb-6">
+  <a href="/jobs/{{ job_id }}" class="text-gray-400 hover:text-gray-600 text-sm">← 返回详情</a>
+  <h1 class="text-2xl font-bold text-gray-800">下载结果</h1>
+</div>
+
+{% if downloads %}
+<div class="bg-white rounded-xl shadow p-6 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">草稿包下载</h2>
+  <div class="space-y-3">
+    {% for dl in downloads %}
+    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+      <div>
+        <p class="font-medium text-gray-800 text-sm">{{ dl.name }}</p>
+        <p class="text-xs text-gray-400">{{ dl.size_mb }} MB</p>
+      </div>
+      <a href="{{ dl.url }}" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">下载</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if self_eval %}
+<div class="bg-white rounded-xl shadow p-6 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">AI 自评分</h2>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+    {% for key, score in self_eval.scores.items() %}
+    <div class="text-center">
+      <div class="text-2xl font-bold text-indigo-600">{{ score }}/5</div>
+      <div class="text-xs text-gray-500 mt-1">{{ key }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="border-t border-gray-100 pt-4">
+    <p class="text-sm text-gray-600">综合评分：<strong class="text-indigo-600">{{ self_eval.overall }}/5</strong></p>
+    {% if self_eval.suggestion %}
+    <p class="text-sm text-gray-500 mt-2">💡 {{ self_eval.suggestion }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if job and job.regenerate_count < 3 %}
+<div class="bg-amber-50 rounded-xl p-5 border border-amber-200">
+  <p class="text-sm text-amber-800 mb-3">对结果不满意？可以一键重新生成解说稿（不重跑 ASR，仅重新 LLM 创作）</p>
+  <p class="text-xs text-amber-600 mb-3">剩余重生成次数：{{ 3 - job.regenerate_count }} 次</p>
+  <form action="/api/jobs/{{ job_id }}/regenerate" method="post">
+    <button type="submit" class="bg-amber-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-amber-700">重新生成解说稿</button>
+  </form>
+</div>
+{% elif job and job.regenerate_count >= 3 %}
+<div class="bg-gray-50 rounded-xl p-4 text-gray-400 text-sm border border-gray-200">
+  已达到最大重生成次数（3次），如需调整请手动在剪映中编辑。
+</div>
+{% endif %}
+
+{% else %}
+<div class="bg-yellow-50 rounded-xl p-6 text-yellow-700 border border-yellow-200">
+  <p class="font-medium mb-2">结果尚未生成</p>
+  <p class="text-sm">任务可能仍在运行中，请稍后刷新。</p>
+  <a href="/jobs/{{ job_id }}" class="text-indigo-500 underline text-sm mt-2 inline-block">查看进度</a>
+</div>
+{% endif %}
+{% endblock %}

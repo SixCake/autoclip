@@ -1,0 +1,85 @@
+{% extends "layout.html" %}
+{% block title %}上传视频 — AutoClip{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-2xl font-bold text-gray-800 mb-6">上传视频生成解说</h1>
+  <form id="upload-form" action="/api/jobs" method="post" enctype="multipart/form-data" class="bg-white rounded-xl shadow p-6 space-y-5">
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">选择视频文件</label>
+      <input type="file" name="file" id="file-input" accept="video/*" required
+        class="block w-full text-sm text-gray-600 border border-gray-300 rounded-lg cursor-pointer p-2 focus:outline-none"/>
+      <p id="file-size-hint" class="mt-1 text-xs text-gray-400"></p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">目标时长</label>
+      <select name="target_duration_sec" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
+        <option value="60">1 分钟 (60s)</option>
+        <option value="90" selected>1.5 分钟 (90s)</option>
+        <option value="180">3 分钟 (180s)</option>
+        <option value="300">5 分钟 (300s)</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">解说风格</label>
+      <select name="style_preset" class="w-full border border-gray-300 rounded-lg p-2 text-sm">
+        <option value="plot_summary" title="具体观察+立场解读，B站头部UP主风格">剧情解说（推荐）</option>
+        <option value="humor_roast" title="吐槽风，口语化幽默，适合搞笑类内容">吐槽风</option>
+        <option value="serious_review" title="严肃影评，分析导演手法与镜头语言">严肃影评</option>
+      </select>
+    </div>
+
+    <div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+      <p class="text-sm font-medium text-gray-700 mb-2">用户协议</p>
+      <p class="text-xs text-gray-500 mb-3">
+        本工具仅供学习研究使用。上传的视频不会长期保留（24小时内自动删除）。
+        请勿上传涉及隐私或版权敏感内容。
+        <a href="/agreement" target="_blank" class="text-indigo-500 underline ml-1">查看完整协议</a>
+      </p>
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" name="agreement_accepted" id="agreement-checkbox" value="true" class="w-4 h-4"/>
+        <span class="text-sm text-gray-700">我已阅读并同意用户协议</span>
+      </label>
+    </div>
+
+    <button type="submit" id="submit-btn" disabled
+      class="w-full bg-indigo-600 text-white py-2.5 rounded-lg font-medium opacity-50 cursor-not-allowed transition-all">
+      开始生成
+    </button>
+    <div id="upload-status" class="hidden text-center text-sm text-gray-500">上传中，请稍候...</div>
+  </form>
+</div>
+
+<script>
+  const checkbox = document.getElementById('agreement-checkbox');
+  const submitBtn = document.getElementById('submit-btn');
+  const fileInput = document.getElementById('file-input');
+  const fileSizeHint = document.getElementById('file-size-hint');
+
+  checkbox.addEventListener('change', () => {
+    submitBtn.disabled = !checkbox.checked;
+    submitBtn.classList.toggle('opacity-50', !checkbox.checked);
+    submitBtn.classList.toggle('cursor-not-allowed', !checkbox.checked);
+  });
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (file) {
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+      fileSizeHint.textContent = `文件大小: ${sizeMB} MB`;
+    }
+  });
+
+  document.getElementById('upload-form').addEventListener('submit', (e) => {
+    if (!checkbox.checked) {
+      e.preventDefault();
+      alert('请先勾选同意用户协议');
+      return;
+    }
+    submitBtn.disabled = true;
+    document.getElementById('upload-status').classList.remove('hidden');
+  });
+</script>
+{% endblock %}

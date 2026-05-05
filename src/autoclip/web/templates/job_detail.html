@@ -1,0 +1,87 @@
+{% extends "layout.html" %}
+{% block title %}任务 #{{ job_id }} 详情 — AutoClip{% endblock %}
+{% block content %}
+<div class="flex items-center gap-3 mb-6">
+  <a href="/jobs" class="text-gray-400 hover:text-gray-600 text-sm">← 返回列表</a>
+  <h1 class="text-2xl font-bold text-gray-800">任务 #{{ job_id }}</h1>
+</div>
+
+{% if job %}
+<div class="bg-white rounded-xl shadow p-6 mb-6">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+    <div>
+      <p class="text-xs text-gray-400">状态</p>
+      <p class="font-semibold text-gray-800">{{ job.status }}</p>
+    </div>
+    <div>
+      <p class="text-xs text-gray-400">目标时长</p>
+      <p class="font-semibold text-gray-800">{{ job.target_duration_sec }}s</p>
+    </div>
+    <div>
+      <p class="text-xs text-gray-400">风格</p>
+      <p class="font-semibold text-gray-800">{{ job.style_preset }}</p>
+    </div>
+    <div>
+      <p class="text-xs text-gray-400">重生成次数</p>
+      <p class="font-semibold text-gray-800">{{ job.regenerate_count }}/3</p>
+    </div>
+  </div>
+
+  <div class="w-full bg-gray-200 rounded-full h-2 mb-1">
+    <div class="bg-indigo-500 h-2 rounded-full transition-all" style="width: {{ (job.progress * 100)|int }}%"></div>
+  </div>
+  <p class="text-xs text-gray-400 text-right">{{ (job.progress * 100)|int }}%</p>
+</div>
+
+{% if state %}
+<div class="bg-white rounded-xl shadow p-6 mb-6">
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">各阶段进度</h2>
+  <div class="space-y-3">
+    {% for stage_name, stage_data in state.stages.items() %}
+    <div class="flex items-center gap-3">
+      <div class="w-24 text-xs text-gray-500 shrink-0">{{ stage_name }}</div>
+      <div class="flex-1 bg-gray-100 rounded-full h-1.5">
+        <div class="h-1.5 rounded-full {% if stage_data.status == 'done' %}bg-green-500{% elif stage_data.status == 'running' %}bg-blue-500{% elif stage_data.status == 'failed' %}bg-red-500{% else %}bg-gray-300{% endif %}"
+          style="width: {{ (stage_data.progress * 100)|int }}%"></div>
+      </div>
+      <div class="w-16 text-right text-xs">
+        {% if stage_data.status == 'done' %}
+          <span class="text-green-600">✓ 完成</span>
+        {% elif stage_data.status == 'running' %}
+          <span class="text-blue-600">运行中</span>
+        {% elif stage_data.status == 'failed' %}
+          <span class="text-red-500">失败</span>
+        {% else %}
+          <span class="text-gray-400">等待中</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if stage_data.error %}
+    <p class="text-xs text-red-500 ml-27 pl-27">错误: {{ stage_data.error }}</p>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="flex gap-3">
+  {% if job.status == 'done' %}
+  <a href="/jobs/{{ job_id }}/result" class="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-700">下载结果</a>
+  {% endif %}
+  {% if job.status in ['running', 'pending'] %}
+  <form action="/api/jobs/{{ job_id }}/cancel" method="post">
+    <button type="submit" class="bg-red-50 text-red-600 border border-red-200 px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-100">取消任务</button>
+  </form>
+  {% endif %}
+</div>
+
+{% else %}
+<div class="bg-red-50 rounded-xl p-6 text-red-600">任务 #{{ job_id }} 不存在</div>
+{% endif %}
+
+{% if job and job.status in ['running', 'pending'] %}
+<script>
+  setTimeout(() => location.reload(), 2000);
+</script>
+{% endif %}
+{% endblock %}

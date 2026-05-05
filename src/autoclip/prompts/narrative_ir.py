@@ -13,9 +13,27 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from autoclip.algo.narrative_ir import NarrativeIR, NarrativeParagraph, NarrativeSentence
 from autoclip.prompts.style_presets.plot_summary import (
-    FEW_SHOT_EXAMPLE,
-    STYLE_DESCRIPTION,
+    FEW_SHOT_EXAMPLE as _PLOT_SUMMARY_FEW_SHOT,
+    STYLE_DESCRIPTION as _PLOT_SUMMARY_STYLE,
 )
+from autoclip.prompts.style_presets.humor_roast import (
+    FEW_SHOT_EXAMPLE as _HUMOR_ROAST_FEW_SHOT,
+    STYLE_DESCRIPTION as _HUMOR_ROAST_STYLE,
+)
+from autoclip.prompts.style_presets.serious_review import (
+    FEW_SHOT_EXAMPLE as _SERIOUS_REVIEW_FEW_SHOT,
+    STYLE_DESCRIPTION as _SERIOUS_REVIEW_STYLE,
+)
+
+_STYLE_REGISTRY = {
+    "plot_summary": (_PLOT_SUMMARY_STYLE, _PLOT_SUMMARY_FEW_SHOT),
+    "humor_roast": (_HUMOR_ROAST_STYLE, _HUMOR_ROAST_FEW_SHOT),
+    "serious_review": (_SERIOUS_REVIEW_STYLE, _SERIOUS_REVIEW_FEW_SHOT),
+}
+
+# Backward-compat aliases (plot_summary default)
+STYLE_DESCRIPTION = _PLOT_SUMMARY_STYLE
+FEW_SHOT_EXAMPLE = _PLOT_SUMMARY_FEW_SHOT
 
 # === Prompt template ===
 
@@ -62,6 +80,7 @@ def build_narrative_ir_messages(
     target_duration_sec: float,
     persona_id: str | None = None,
     persona_reference_lines: list[str] | None = None,
+    style_preset: str = "plot_summary",
 ) -> list:
     """Build SystemMessage + HumanMessage for narrative IR generation.
 
@@ -74,6 +93,7 @@ def build_narrative_ir_messages(
         persona_reference_lines: Optional list of reference lines extracted from
                     docs/personas/{persona_id}.md via persona_inferer.extract_reference_lines().
                     If None or empty, a placeholder block is used.
+        style_preset: One of plot_summary / humor_roast / serious_review (M4.3).
 
     Returns:
         List of LangChain BaseMessage instances.
@@ -99,15 +119,20 @@ def build_narrative_ir_messages(
     # Karpathy §3 fix: caller must explicitly format ALL placeholders in STYLE_DESCRIPTION
     # (target_duration_sec / target_sentences / persona_reference_block). Previous version
     # left {target_*} unreplaced, leaking literal "{target_duration_sec}" into the LLM prompt.
+    # M4.3: select style preset
+    selected_style_desc, selected_few_shot = _STYLE_REGISTRY.get(
+        style_preset, (_PLOT_SUMMARY_STYLE, _PLOT_SUMMARY_FEW_SHOT)
+    )
+
     main_characters = plot_outline_dict.get("main_characters", [])
     if not main_characters:
         # Omit role-aware constraints when no characters available; keep persona block intact
         # (persona_reference_block sits BEFORE 【角色称呼】 in STYLE_DESCRIPTION, so split is safe).
-        style_desc_raw = STYLE_DESCRIPTION.split("【角色称呼】")[0].strip()
+        style_desc_raw = selected_style_desc.split("【角色称呼】")[0].strip()
         role_clause = "\n\n【角色称呼】\n当前剧情大纲未提供角色信息，可使用通用指代如「他」「她」"
         style_desc_raw += role_clause
     else:
-        style_desc_raw = STYLE_DESCRIPTION
+        style_desc_raw = selected_style_desc
 
     style_desc = style_desc_raw.format(
         target_duration_sec=target_duration_sec,
@@ -122,7 +147,7 @@ def build_narrative_ir_messages(
     user_content = USER_PROMPT_TEMPLATE.format(
         plot_outline_json=json.dumps(plot_outline_dict, ensure_ascii=False, indent=2),
         asr_with_timestamps=truncated_asr,
-        few_shot_json=json.dumps(FEW_SHOT_EXAMPLE, ensure_ascii=False, indent=2),
+        few_shot_json=json.dumps(selected_few_shot, ensure_ascii=False, indent=2),
     )
 
     return [

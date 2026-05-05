@@ -100,11 +100,11 @@ def clear_stage_handlers() -> None:
 # their `register_stage_handler()` side effects.
 # Modules are added here as they're implemented in M1.6, M1.7, M1.8...
 _STAGE_MODULES: tuple[str, ...] = (
-    "autoclip.pipeline.ingest",  # M1.6 — dual-track normalize + audio extract
-    "autoclip.pipeline.index",   # M1.8 — shot detection + ASR + audio.wav cleanup (K9)
-    "autoclip.pipeline.scripting",  # M2a.6 — plot_outline + narrative_ir LLM + greedy binding → timeline.json
-    # "autoclip.pipeline.assembly",
-    # "autoclip.pipeline.render",
+    "autoclip.pipeline.ingest",    # M1.6 — dual-track normalize + audio extract
+    "autoclip.pipeline.index",     # M1.8 — shot detection + ASR + audio.wav cleanup (K9)
+    "autoclip.pipeline.scripting", # M2a.6 — plot_outline + narrative_ir + greedy binding → timeline.json
+    "autoclip.pipeline.assembly",  # M3.2 — TTS batch synthesis → assembly.json
+    "autoclip.pipeline.render",    # M3.5 — draft export + K10 validation
 )
 
 

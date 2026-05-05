@@ -110,6 +110,18 @@ def create_job(  # noqa: PLR0913 — multipart form needs many params
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "file.filename missing")
 
+    # M3.9: agreement must be accepted (K11 backend gate)
+    if not agreement_accepted:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "用户协议必须勾选同意才能创建任务")
+
+    # M4.3: validate style_preset enum
+    _VALID_STYLE_PRESETS = frozenset({"plot_summary", "humor_roast", "serious_review"})
+    if style_preset not in _VALID_STYLE_PRESETS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"style_preset 不合法: {style_preset!r}，合法值: {sorted(_VALID_STYLE_PRESETS)}",
+        )
+
     # Step 1: create Job record (we need its auto-id to know the job_dir)
     with session_scope(session_factory) as sess:
         job = Job(
@@ -274,3 +286,88 @@ def cancel_job(
         )
     state.request_cancel()
     return {"job_id": job_id, "cancelled": True}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/{id}/regenerate — M4.4 one-click regenerate
+# ---------------------------------------------------------------------------
+
+@router.post("/{job_id}/regenerate", status_code=status.HTTP_202_ACCEPTED)
+def regenerate_job(
+    job_id: int,
+    session_factory: Annotated[Any, Depends(get_session_factory)],
+) -> dict[str, Any]:
+    """Reset script/assembly/render stages and rerun pipeline from SCRIPT.
+
+    Limits: max 3 regenerations per job (K4 cost control).
+    Does NOT re-run ingest/index — reuses shots.json + asr.json.
+    """
+    import shutil
+
+    with session_scope(session_factory) as sess:
+        job = sess.get(Job, job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Job {job_id} not found")
+        if job.regenerate_count >= 3:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                f"Job {job_id} has reached the maximum of 3 regenerations",
+            )
+        job.regenerate_count += 1
+
+    job_dir = _job_dir(job_id)
+    state = JobStateFile(job_dir)
+    if not state.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Job {job_id} state.json not found")
+
+    # Delete downstream artifacts so pipeline rebuilds them
+    for artifact in ("timeline.json", "assembly.json", "self_evaluation.json"):
+        artifact_path = job_dir / artifact
+        if artifact_path.exists():
+            artifact_path.unlink()
+
+    output_dir = job_dir / "output"
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+
+    # Reset SCRIPT/ASSEMBLY/RENDER stages to PENDING in state.json
+    from ..pipeline.state import Stage, StageState, StageStatus
+    current = state.load()
+    for stage_name in (Stage.SCRIPT.value, Stage.ASSEMBLY.value, Stage.RENDER.value):
+        current["stages"][stage_name] = StageState().to_dict()
+    state._save_atomic(current)  # noqa: SLF001
+
+    # Dispatch new subprocess — PipelineRunner will skip DONE ingest/index
+    proc = mp.Process(
+        target=_run_pipeline_in_subprocess,
+        args=(str(job_dir),),
+        name=f"autoclip-regen-job-{job_id}",
+        daemon=False,
+    )
+    proc.start()
+    logger.info("Job %d regeneration dispatched (count=%d)", job_id, job.regenerate_count)
+
+    return {"job_id": job_id, "regenerate_count": job.regenerate_count, "status": "regenerating"}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/jobs/{id}/download/{filename} — download output zip
+# ---------------------------------------------------------------------------
+
+@router.get("/{job_id}/download/{filename}")
+def download_output(
+    job_id: int,
+    filename: str,
+    session_factory: Annotated[Any, Depends(get_session_factory)],
+) -> Any:
+    """Download an output zip from the job's output/ directory."""
+    from fastapi.responses import FileResponse
+
+    output_path = _job_dir(job_id) / "output" / filename
+    if not output_path.exists() or not output_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"File {filename} not found for job {job_id}")
+    return FileResponse(
+        path=str(output_path),
+        filename=filename,
+        media_type="application/zip",
+    )

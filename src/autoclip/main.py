@@ -17,17 +17,21 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import jobs_router
 from .config import get_settings
 from .db import create_app_engine, init_db, make_session_factory
+from .web.routes import router as web_router
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +56,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         __version__, settings.data_dir, db_path,
     )
 
+    # M3.8: start cron cleanup background task
+    async def _cron_task() -> None:
+        while True:
+            await asyncio.sleep(3600)  # run hourly
+            try:
+                from .compliance.cleanup import cron_cleanup_temp
+                deleted = cron_cleanup_temp(settings.data_dir)
+                if deleted:
+                    logger.info("Cron cleanup: deleted %d expired output zips", deleted)
+            except Exception as cron_err:
+                logger.warning("Cron cleanup error: %s", cron_err)
+
+    cron_task = asyncio.create_task(_cron_task())
+    logger.info("Cron cleanup task started")
+
     try:
         yield
     finally:
+        cron_task.cancel()
         engine.dispose()
         logger.info("AutoClip stopped — engine disposed")
 
@@ -74,6 +94,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     app.include_router(jobs_router, prefix="/api")
+    app.include_router(web_router)
     return app
 
 
