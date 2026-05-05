@@ -61,45 +61,72 @@
 
 ## 任务清单（6 个）
 
-### M2a.1 — LLMProvider 抽象 + QwenProvider 实现
+### M2a.1 — LangChain 集成 + LLMFactory + LlmCallsRecorder（**v0.5 重写**）
 
-**目标**: 定义 LLM 接口契约，实现通义千问 qwen-plus Provider（design.md ADR-001）。
+**目标**: 通过 LangChain `BaseChatModel` 抽象层接入 DeepSeek-V3 主 provider + qwen-plus 兜底 provider，并实现 `LlmCallsRecorder` callback 把每次 LLM 调用落盘到 `{job_dir}/llm_calls/`（design.md ADR-001 v0.5 修订 + 本 plan 头部决策矩阵 Q1/Q2/Q3/Q4 + B1/B2/B3）。
+
+> **v0.5 变更说明**：v0.4 旧版"自抽象 LLMProvider ABC + QwenProvider 直连 dashscope SDK + tenacity retry"被 brainstorming Q1-Q4 决策替换。新版用 LangChain 原生 `BaseChatModel` 替代自造 ABC（约 -150 行抽象代码），DeepSeek 替代 qwen 作主 provider（成本更低 + 128k context），通过 `BaseCallbackHandler` 而非 handler 层手写实现 LLM 调用可观测性（M2a.6 因此减重 -0.7d）。本任务**故意不引入** `ChatPromptTemplate` / `PydanticOutputParser` / `OutputFixingParser`（B1=A 最小化深度决策，详见 M2a.4 备注）。
 
 **关键设计决策**:
-- **LLMProvider 抽象**: 单方法 `chat(messages, *, temperature, max_tokens, response_format) -> LLMResponse`
-- **数据结构**:
-  - `LLMMessage(role: Literal['system','user','assistant'], content: str)` — `__post_init__` 校验 role
-  - `LLMResponse(content, input_tokens, output_tokens, model, raw?)` + `total_tokens` 属性
-- **QwenProvider**:
-  - 默认 model = `qwen-plus`
-  - 通过 dashscope SDK 调用，`result_format="message"`
-  - 支持 JSON mode：`response_format={"type":"json_object"}`
-  - tenacity retry 3 次（指数退避，min=2s max=20s），仅对 RuntimeError 重试
-  - 失败抛 `RuntimeError(f"Qwen API failed: code={code} msg={msg}")`
-- **依赖声明**（**G1, 2026-05-04 adhoc 补充**）：M2a 启动第一步必须先在 `pyproject.toml` 的 `[tool.poetry.dependencies]` 段追加：
-  - `dashscope = "^1.20"`（通义千问 SDK，QwenProvider 直接依赖）
-  - `tenacity = "^9.0"`（HTTP 层 retry 装饰器，QwenProvider + M2a.4 retry_with_repair 共用）
-  - `pydantic = "^2.0"`（M2a.2 `_PlotOutlineRaw` Pydantic 校验层，与 pydantic-settings 1.x 共存）
-  - 完成后跑 `poetry lock --no-update && poetry install` 锁版本，并提交 `pyproject.toml` + `poetry.lock` 一起 commit（避免后续 task 因依赖缺失返工）
+- **LangChain 抽象层**: 直接用 `langchain_core.language_models.BaseChatModel.invoke(messages: list[BaseMessage]) -> AIMessage`；**不自造 LLMProvider ABC**，不自造 LLMMessage / LLMResponse dataclass
+- **数据结构**（全部用 LangChain 原生类型）:
+  - 输入: `list[BaseMessage]` —— `SystemMessage(content=...)` + `HumanMessage(content=...)`（来自 `langchain_core.messages`）
+  - 输出: `AIMessage` —— `aimsg.content` 取文本，`aimsg.usage_metadata` 取 `{input_tokens, output_tokens, total_tokens}`（LangChain 0.3+ 标准化字段）
+- **`get_llm()` factory**（`src/autoclip/providers/llm/factory.py`）:
+  - 签名: `get_llm(provider: Literal["deepseek","dashscope"] | None = None, *, json_mode: bool = False, callbacks: list[BaseCallbackHandler] | None = None, temperature: float = 0.3, max_tokens: int = 2000, **model_kwargs) -> BaseChatModel`
+  - `provider` 默认从 env var `AUTOCLIP_LLM_PROVIDER`（值 `deepseek` 或 `dashscope`）读取，缺省为 `deepseek`
+  - **DeepSeek 分支**（`provider="deepseek"`）: 返回 `ChatOpenAI(model="deepseek-chat", base_url="https://api.deepseek.com/v1", api_key=os.environ["DEEPSEEK_API_KEY"], temperature=temperature, max_tokens=max_tokens, max_retries=2, callbacks=callbacks, model_kwargs={"response_format": {"type": "json_object"}} if json_mode else {})`
+  - **dashscope 分支**（`provider="dashscope"`）: 返回 `ChatTongyi(model="qwen-plus", api_key=os.environ["DASHSCOPE_API_KEY"], temperature=temperature, max_retries=2, callbacks=callbacks, model_kwargs={"response_format": {"type": "json_object"}} if json_mode else {})`（`langchain_community.chat_models.ChatTongyi`）
+  - **缺 api_key 时**: 抛 `RuntimeError(f"{ENV_VAR} not set; cannot init {provider} provider")`，**不自动 fallback**（避免静默降级隐藏配置错误，K8 硬失败精神）
+- **`LlmCallsRecorder` callback**（`src/autoclip/providers/llm/callback.py`）:
+  - 继承 `langchain_core.callbacks.BaseCallbackHandler`
+  - 构造: `LlmCallsRecorder(job_dir: Path, stage: str)` —— `stage` 作为文件名前缀（M2a.6 传 `"scripting"`）
+  - 实现 `on_chat_model_start(serialized, messages, run_id, **kw)` + `on_llm_end(response: LLMResult, run_id, **kw)`：成对捕获请求 / 响应，按 `run_id` 配对
+  - 落盘路径: `{job_dir}/llm_calls/{stage}_{seq:03d}.json`（`seq` 是 instance 内自增计数器，从 1 起）
+  - 落盘 schema: `{"seq": int, "stage": str, "model": str, "messages": [{"role": str, "content": str}], "response": str, "usage": {"input_tokens": int, "output_tokens": int, "total_tokens": int}, "started_at": "ISO8601", "ended_at": "ISO8601", "duration_sec": float}`
+  - 目录不存在时自动 `mkdir(parents=True, exist_ok=True)`
+  - 写盘失败（磁盘满 / 权限错）只 `loguru.warning(...)`，**不抛**（避免可观测性逻辑反向阻塞业务调用）
+- **依赖声明**（**D1=B + D2=A 决策**）：M2a.1 实现第一步必须在 `pyproject.toml` 的 `[tool.poetry.dependencies]` 段追加：
+  - `langchain-core = ">=0.3,<0.4"`（`BaseChatModel` / `BaseMessage` / `BaseCallbackHandler` 来源）
+  - `langchain-openai = ">=0.2,<0.3"`（`ChatOpenAI`，DeepSeek 通过它接入）
+  - `langchain-community = ">=0.3,<0.4"`（`ChatTongyi`，dashscope 通过它接入；显式锁版本以防 community 升级断 dashscope 接入）
+  - `dashscope = "^1.20"`（**保留**，`ChatTongyi` 实际依赖此 SDK，D1=B 显式锁定避免传递依赖隐式升级）
+  - `pydantic = "^2.0"`（M2a.2 `_PlotOutlineRaw` 校验层使用）
+  - **删除**: `tenacity` 不再需要（HTTP 层重试由 `ChatOpenAI(max_retries=2)` 接管；M2a.4 `retry_with_repair` 是应用层 JSON 修复重试，自实现 for 循环即可，不需要 tenacity 装饰器）
+  - 完成后跑 `poetry lock --no-update && poetry install` 锁版本，并把 `pyproject.toml` + `poetry.lock` 一起 commit
 
 **涉及文件**:
-- Modify: `pyproject.toml`（依赖声明 + `poetry.lock` 同步）
-- Create: `src/autoclip/providers/llm/{__init__,base,qwen}.py`
-- Create: `tests/unit/test_llm_base.py`
-- Create: `tests/integration/test_qwen_provider.py`（默认 skip，需 `RUN_INTEGRATION=1`）
+- Modify: `pyproject.toml`（依赖增减如上 + `poetry.lock` 同步）
+- Create: `src/autoclip/providers/llm/__init__.py`（re-export `get_llm` + `LlmCallsRecorder`）
+- Create: `src/autoclip/providers/llm/factory.py`（`get_llm()` 实现）
+- Create: `src/autoclip/providers/llm/callback.py`（`LlmCallsRecorder` 实现）
+- Create: `tests/unit/test_llm_factory.py`（FakeListChatModel 注入 + 双 provider 路径 + env var 缺失抛错）
+- Create: `tests/unit/test_llm_callback.py`（落盘 schema / 文件命名 / mkdir 自动创建 / 写盘失败不抛）
+- Create: `tests/integration/test_dual_provider_smoke.py`（默认 skip，需 `RUN_INTEGRATION=1` + `DEEPSEEK_API_KEY` + `DASHSCOPE_API_KEY`，问 "1+1=?" 验证返回含 "2" 且 `usage_metadata.total_tokens > 0`）
 
 **测试策略**:
-- 单元: role 校验 / dataclass 字段 / mock provider 实现接口可继承
-- 集成（手动）: 真实调用 qwen-plus 问 "1+1=?"，验证返回包含 "2" + token 计数 > 0
+- 单元（factory，≥ 5 用例）:
+  - `test_get_llm_default_provider_is_deepseek`：不传 provider 且无 env var 时返回 `ChatOpenAI` 实例且 `model_name == "deepseek-chat"`
+  - `test_get_llm_dashscope_explicit`：`provider="dashscope"` 返回 `ChatTongyi` 实例且 `model == "qwen-plus"`
+  - `test_get_llm_json_mode_passes_response_format`：`json_mode=True` 时 `model_kwargs["response_format"] == {"type": "json_object"}`
+  - `test_get_llm_missing_api_key_raises`：monkeypatch `delenv("DEEPSEEK_API_KEY")` 后 `provider="deepseek"` 抛 `RuntimeError` 且 message 含 "DEEPSEEK_API_KEY not set"
+  - `test_get_llm_with_callbacks_attaches`：传 `callbacks=[LlmCallsRecorder(tmp_path, "test")]` 后回返实例的 `.callbacks` 包含该 recorder
+- 单元（callback，≥ 4 用例）:
+  - `test_recorder_writes_file_on_llm_end`：用 `FakeListChatModel(responses=["hello"])` 跑一次 invoke，断言 `{tmp_path}/llm_calls/test_001.json` 存在 + JSON parse 成功 + schema 字段齐全
+  - `test_recorder_seq_increments_across_calls`：连跑 3 次 invoke，断言文件 `test_001.json` / `test_002.json` / `test_003.json` 都存在且 `seq` 字段 1/2/3
+  - `test_recorder_creates_dir_if_missing`：传不存在的 `job_dir / "deeply" / "nested"`，断言目录被自动创建
+  - `test_recorder_disk_failure_does_not_raise`：monkeypatch `Path.write_text` 抛 `OSError`，断言 invoke 仍成功且无异常上抛（仅 loguru warn）
+- 集成（手动，≥ 2 用例）: `test_deepseek_smoke` + `test_dashscope_smoke` 各问 "1+1=?"，断言响应文本含 "2" + `usage_metadata.total_tokens > 0` + `{job_dir}/llm_calls/smoke_001.json` 落盘成功
 
 **验收标准**:
-- [ ] mock provider 测试 ≥ 3 个用例通过
-- [ ] 集成测试本地手跑通过
-- [ ] JSON mode 在 M2a.3 实测能稳定返回合法 JSON（≥ 80% 不需 repair）
+- [ ] 单元测试 ≥ 9 个用例全部通过（factory 5 + callback 4）
+- [ ] 双 provider 集成冒烟测试（DeepSeek + dashscope）本地手跑均通过（B2=B 决策硬要求）
+- [ ] `{job_dir}/llm_calls/scripting_001.json` 在集成测试后实际存在且 schema 合法（K3 验证）
+- [ ] JSON mode 在 M2a.3 实测 DeepSeek 主路径稳定返回合法 JSON（≥ 80% 不需 repair）
 
-**关联 KPI**: K8
-**依赖**: M1.1 → **阻塞**: M2a.2 / M2a.3
-**预估工时**: 0.5d
+**关联 KPI**: K3（llm_calls/ 落盘）+ K8（单测覆盖率）
+**依赖**: M1.1 → **阻塞**: M2a.2 / M2a.3 / M2a.6
+**预估工时**: **1.0d**（v0.5 +0.5d：B3=A 工时净值 = -0.5d 少写 ABC + Callback 实现 +0.5d + B2=B dashscope 实跑冒烟 +0.3d + LangChain 学习曲线 +0.2d = 净 +0.5d）
 
 ---
 

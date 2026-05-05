@@ -613,3 +613,41 @@ M2a.1 实现阶段：安装 LangChain 依赖 + 编写 factory.py + callback.py +
 - **M2a kickoff 前** (0.05d): 修 LIM#8 — runner.py StageHandler Protocol docstring 与 _stage_entrypoint 实现对齐, 明确 "RUNNING owned by entrypoint, handler must mark DONE/FAILED only"
 - **M1 e2e 验收** (人工, 0.2d): uvicorn 启动 → curl POST /api/jobs 5min 短片 → 验证 2min 内全 DONE / shots.json + asr.json 合规 / audio.wav 已删
 - **M2a Scripting 主链路启动** (W2 周, 6 任务, ~5d): 候选脚本生成 + 评分 + 选优, 依赖 M1 e2e 验收锁定 shots.json + asr.json schema
+
+
+---
+
+## Session 11 (2026-05-05) — M2a.1 实现前 adhoc v0.5-corr 修复
+
+### 触发契机
+用户输入 "现在开始实现"，进入 M2a.1 编码前我做了一次 plan 一致性核查，发现 **commit message vs actual diff drift**：
+- `commit 0e45501` 的 message 列了 10 项改动并声称 "M2a.1 rewritten: LangChain BaseChatModel integration + LLMFactory ..."
+- 但实际 diff 仅 130 行新增 / 52 行删除，**M2a.1 任务体（M2a-scripting-main.md line 64-110）仍是 v0.4 旧版** "LLMProvider 抽象 + QwenProvider 实现 + dashscope 直连 + tenacity"
+- 文件头部决策矩阵 / ADR-001 / M2a.6 都是 v0.5 LangChain 版，**仅 M2a.1 任务体一处遗漏**，造成 plan 内部矛盾
+
+### 阶段判断
+按 project_rules 892.md 第 0 节失败兜底机制 "缺少计划外变更记录 → 回退到 adhoc-changes"，从「第三阶段任务执行」**回退到 adhoc-changes 阶段**：
+- 如果直接按 M2a.1 旧版任务体编码，会写出与 M2a.6（已 v0.5）+ ADR-001（已 v0.5）完全不兼容的代码（自抽象 ABC + dashscope 直连 vs LangChain + DeepSeek）
+- 必须先补 M2a.1 任务体，再开始实现
+
+### 用户决策
+向用户报告问题 + 给出 A/B 两选项，用户选 **A（推荐）**：先补 doc 再实现
+
+### corr-1: M2a.1 任务体重写 (line 64-110)
+- 旧版 (2230 bytes): 标题 "LLMProvider 抽象 + QwenProvider 实现"；自造 LLMMessage / LLMResponse dataclass；QwenProvider 直连 dashscope SDK + tenacity retry；依赖 dashscope^1.20 + tenacity^9.0 + pydantic^2.0
+- 新版 (8111 bytes, +4767): 标题 "LangChain 集成 + LLMFactory + LlmCallsRecorder（v0.5 重写）"；删除自抽象 dataclass，改用 LangChain 原生 BaseMessage / AIMessage.usage_metadata；`get_llm()` factory（DeepSeek 主 ChatOpenAI base_url=https://api.deepseek.com/v1 + dashscope 兜底 ChatTongyi）；`LlmCallsRecorder(BaseCallbackHandler)` 落盘 `{job_dir}/llm_calls/{stage}_{seq:03d}.json`；涉及文件 `providers/llm/{__init__,factory,callback}.py` + `tests/unit/test_llm_factory.py + test_llm_callback.py + tests/integration/test_dual_provider_smoke.py`；依赖 `langchain-core>=0.3,<0.4 + langchain-openai>=0.2,<0.3 + langchain-community>=0.3,<0.4 + dashscope^1.20`（D1=B 显式锁版本，删 tenacity 因 ChatOpenAI 内置 max_retries=2）；工时 0.5d→1.0d
+- 测试要求: 单元 ≥ 9 用例（factory 5 + callback 4），集成 2 用例（DeepSeek + dashscope smoke 各跑一次 "1+1=?"）
+
+### corr-2: plan.md changelog 加 v0.5-corr 行 (+1255 bytes)
+- 在 v0.5 行后追加 v0.5-corr 行，文档化 "commit message vs actual diff drift" 修复全过程
+- 标注根因: v0.5 brainstorming 批次 1 file_replace 阵列遗漏 M2a.1 任务体替换且未在批次 2 验证阶段捕获，触发 LIM#9 "downstream consumer breaks" 条款
+
+### LIM#9 第 7 次执行场景判断
+本次修复 **不是** plan-layer self-check Round N（之前是用户主动追问触发，本次是我自己进入实现阶段时发现 plan 内部矛盾）。属于 LIM#9 契约白名单 "(b) downstream consumer breaks"，是合法的修复入口，不是 self-check 套娃。
+
+### 下一步
+进入 M2a.1 实现阶段，分 4 批次：
+1. **批次 1**: `poetry add` LangChain 三件套 + dashscope（D1=B 显式锁版本）
+2. **批次 2**: 创建 `providers/llm/{__init__,factory,callback}.py` + 9 个单元测试（TDD fail-first → 实现 → pass）
+3. **批次 3**: 双 provider 冒烟集成测试（需用户提供 `DEEPSEEK_API_KEY` + `DASHSCOPE_API_KEY`）
+4. **批次 4**: git commit + worktree-save 结束门禁

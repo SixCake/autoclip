@@ -914,3 +914,43 @@ User in pre-M1.5 phase:
 
 **写给未来自己的话** (压缩后续 session 上下文时优先保留):
 > M1.8 6 轮 self-check 的核心结论不是"找到了多少 bug", 而是**"用户为什么要追问 5 次"**. 答案: 我每轮都自信"已经检查干净了", 但真正干净的标准不是"找不到 bug 了", 而是**"已经把 scope 扩展到所有相关代码 (含依赖模块) + 完整 read + dry-run 实测"**. Round 1-5 都没做到第三条 (Round 3→4 还反向引入了 BUG#10). Round 6 终于做到了. 后续每个 milestone 完成时, 不等用户问就主动按这个 checklist 自查一遍, 才是"提前完成"的真正含义.
+
+
+---
+
+## 2026-05-05 — Session 11: M2a.1 实现前 adhoc v0.5-corr 修复 (commit message vs actual diff drift)
+
+### 触发
+用户输入 "现在开始实现"（M2a.1 编码启动），我执行 plan 一致性核查发现 commit `0e45501` message vs actual diff 不一致：声称 "M2a.1 rewritten" 但 diff 实际未改 M2a.1 任务体。
+
+### 调查路径
+1. `grep -n "^### M2a" docs/plans/tasks/M2a-scripting-main.md` 列出所有 task 锚点
+2. `awk '/^### M2a\.1/,/^### M2a\.2/'` 提取 M2a.1 任务体当前内容 → 发现是 v0.4 旧版
+3. `git show --stat 0e45501` + `git show 0e45501 -- docs/plans/tasks/M2a-scripting-main.md | grep -A 5 "M2a.1"` → 验证 commit 实际 diff 不含 M2a.1 任务体重写
+4. 反向核查 ADR-001 (design.md line 789+) / M2a.4 (OutputFixingParser 备注) / M2a.6 (K3/K7/K8/K9/K10) → 全部已 v0.5 落盘
+5. **结论**: 仅 M2a.1 任务体一处 file_replace 遗漏，但 commit message 错误声称已改
+
+### 修复
+- **corr-1**: `docs/plans/tasks/M2a-scripting-main.md` M2a.1 任务体重写（line 64-110）
+  - 旧 2230 bytes → 新 8111 bytes（+4767 bytes）
+  - 标题: "LLMProvider 抽象 + QwenProvider 实现" → "LangChain 集成 + LLMFactory + LlmCallsRecorder（v0.5 重写）"
+  - 数据结构: 删自造 LLMMessage / LLMResponse → 改用 LangChain 原生 BaseMessage / AIMessage.usage_metadata
+  - 实现: 加 `get_llm()` factory + `LlmCallsRecorder(BaseCallbackHandler)`
+  - 依赖: 加 langchain-core/openai/community 三件套 + 删 tenacity（ChatOpenAI 内置 max_retries=2）
+  - 测试: 单元 ≥ 9 + 集成 2（双 provider smoke）
+  - 工时: 0.5d → 1.0d
+- **corr-2**: `docs/plans/2026-05-04-autoclip-plan.md` changelog 加 v0.5-corr 行（+1255 bytes）
+
+### LIM#9 上下文
+本次修复 **不计入** plan-layer self-check Round 计数。LIM#9 契约 "downstream consumer breaks" 是合法的 adhoc 修复入口（区别于用户主动追问触发的 self-check 套娃）。M2a.1 实现阶段作为 plan 文档的下游消费者，发现内部矛盾必须修复。
+
+### Commit
+- `📝docs : adhoc plan v0.5-corr — M2a.1 task body sync to v0.5 decision matrix (commit message vs actual diff drift fix)`
+- 改动: M2a-scripting-main.md +4767 / plan.md +1255 / chat.md / changes.md / state.json
+- doc-only，不动 src/，不跑 pytest
+
+### 下一步
+进入 M2a.1 实现阶段（4 批次 TDD）。
+
+### 元教训
+**commit message ≠ actual diff**: 之前我把 "file_replace 调用成功" 当作 "落盘成功" 的等价信号，但批次 1 时如果有任何一个 file_replace 静默失败（返回 success 但实际不匹配），commit message 仍会列出全部声称改动，造成历史记录与文件状态脱节。**修复方向**：批次 2 验证阶段必须 grep 每一处声称的改动是否在文件中实际出现，而不是只看 file_replace 工具返回值。
