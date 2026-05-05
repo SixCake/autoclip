@@ -94,3 +94,62 @@ class PlotOutline:
             "plot_summary": self.plot_summary,
             "key_acts": [a.to_dict() for a in self.key_acts],
         }
+
+
+# === Narrative IR models for Scripting stage output (M2a.3) ===
+
+@dataclass(frozen=True)
+class NarrativeSentence:
+    """One sentence in the narrative script."""
+    sentence_idx: int
+    text: str
+    evidence_keywords: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class NarrativeParagraph:
+    """One paragraph grouping related sentences."""
+    paragraph_idx: int
+    topic: str
+    approx_source_start_sec: float
+    approx_source_end_sec: float
+    sentences: list[NarrativeSentence] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.approx_source_start_sec < 0:
+            raise ValueError(f"approx_source_start_sec must be non-negative, got {self.approx_source_start_sec}")
+        if self.approx_source_end_sec < self.approx_source_start_sec:
+            raise ValueError(f"approx_source_end_sec ({self.approx_source_end_sec}) must be >= approx_source_start_sec ({self.approx_source_start_sec})")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paragraph_idx": self.paragraph_idx,
+            "topic": self.topic,
+            "approx_source_start_sec": self.approx_source_start_sec,
+            "approx_source_end_sec": self.approx_source_end_sec,
+            "sentences": [s.to_dict() for s in self.sentences],
+        }
+
+
+@dataclass(frozen=True)
+class NarrativeIR:
+    """Full narrative intermediate representation."""
+    paragraphs: list[NarrativeParagraph] = field(default_factory=list)
+
+    def iter_sentences(self) -> list[NarrativeSentence]:
+        """Flatten all sentences across paragraphs in order."""
+        result = []
+        for para in self.paragraphs:
+            result.extend(para.sentences)
+        return result
+
+    def total_sentences(self) -> int:
+        return sum(len(p.sentences) for p in self.paragraphs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paragraphs": [p.to_dict() for p in self.paragraphs],
+        }
