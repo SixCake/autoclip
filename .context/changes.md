@@ -38,6 +38,56 @@ User asked 3 times during batch-1 execution "请检查当前编辑的文件里�
 M2a.1 implementation phase: install LangChain dependencies + write factory.py + callback.py + unit tests + dual-provider smoke test. Estimated 1.0d.
 
 ---
+## 2026-05-05 (Session 16: M2a.5 naive greedy binder implementation)
+
+### Trigger
+User input "继续" after M2a.4 completion, entering M2a.5 coding phase. During pre-impl read identified design mismatch: M2a.5 plan §282-286 requires `BindingMethod.HINT_UNIFORM` enum value but `models/timeline.py` ORM only had EVIDENCE / EVIDENCE_LOWCONFIDENCE / FALLBACK_UNIFORM. Asked user single question (per brainstorming skill); user chose Option A (ORM 加 HINT_UNIFORM + algo 层用同一 enum, 单一真相源).
+
+### Implementation
+1. **m2a5-1**: Modified `src/autoclip/models/timeline.py` (+1 enum value, refined comment)
+   - `BindingMethod` enum 加 `HINT_UNIFORM = "hint_uniform"` (M2a baseline: uniform split within paragraph hint window)
+   - 完整成员: HINT_UNIFORM (M2a baseline) / EVIDENCE (M2b high-conf) / EVIDENCE_LOWCONFIDENCE (M2b low-conf reserved) / FALLBACK_UNIFORM (M2b resolve None fallback)
+   - 单一真相源: algo 层 (greedy_binder.py) + ORM 层 (TimelineSegment.binding_method) + JSON 序列化 全部复用此 enum
+2. **m2a5-2**: Created `src/autoclip/algo/greedy_binder.py` (213 行)
+   - `BoundSegment(paragraph_idx, sentence_idx, sentence_text, source_start_sec, source_end_sec, source_shot_ids, binding_method=HINT_UNIFORM)` frozen dataclass + `duration_sec` property + `to_dict()`
+   - `BindingResult(segments, fallback_count=0)` frozen dataclass + `total_count` / `fallback_ratio` (K3 关联，empty-result 0.0 不抛 div-by-zero) + `to_dict()`
+   - `bind_naively(ir, shots, min_segment_sec=0.8) -> BindingResult` 6 步算法:
+     1. video_end = max(s.end_sec for s in shots), 空 shots 返回空 result
+     2. 每个 paragraph: clamp [start, end] 到 [0, video_end]
+     3. uniform split: per = (p_end - p_start) / n_sentences
+     4. min_segment_sec 保障: 不足时在 parent paragraph 内向右后向左扩展
+     5. shot 重叠匹配: strict inequality (s.start < seg_end and s.end > seg_start)
+     6. 极端 fallback: 无重叠时取 |s.start_sec - seg_center| 最近的 shot id
+   - 私有辅助: `_video_end_sec` / `_clamp_window` / `_shots_overlapping` / `_nearest_shot_id`
+   - 入参校验: min_segment_sec ≤ 0 抛 ValueError
+3. **m2a5-3**: Created `tests/unit/test_greedy_binder.py` (303 行, 20 用例 / 9 测试类)
+   - **TestUniformSplit (2)**: paragraph [10,40] 3 句 → [10,20]/[20,30]/[30,40] / single sentence 取整段
+   - **TestParagraphClamp (2)**: end 超出 video_end 钳制 / 窗口完全在 video bounds 内不钳制 (原 negative-start 用例删除 — 违反 NarrativeParagraph schema 约束 approx_source_start_sec ≥ 0; 替换为 in-bounds sanity check)
+   - **TestMinSegmentExpansion (3)**: 短窗口扩展 / custom min_segment_sec=2.0 全部 ≥ 2s / 入参 ≤ 0 抛 ValueError
+   - **TestShotOverlapMatching (3)**: 段重叠两 shots / 段在单 shot 内 / 三句三 shots 边界对齐 (验证 strict inequality 不重复匹配)
+   - **TestExtremeFallback (2)**: 无 overlap → 取 nearest by |start_sec - center| / 空 shots → 空 result
+   - **TestBindingResultProperties (3)**: M2a baseline fallback_ratio=0 / empty 不抛 div-by-zero / 合成 2/5=0.4 验证算式
+   - **TestBindingMethodAlwaysHintUniform (1)**: 所有 segment 都是 HINT_UNIFORM
+   - **TestSerialization (2)**: BoundSegment.to_dict 含 binding_method.value="hint_uniform" / BindingResult.to_dict 含 fallback_ratio
+   - **TestMultiParagraph (2)**: 多段顺序 / empty paragraph 跳过
+
+### Commit
+- `✨feat : M2a.5 implementation — naive greedy binder (HINT_UNIFORM) + 20 unit tests (20/20 passed)` → commit `a7f8cb5`
+- 3 files changed, 558 insertions(+), 1 deletion(-) — models/timeline.py (+2/-1) + algo/greedy_binder.py (213 new) + tests/unit/test_greedy_binder.py (303 new)
+
+### Test Status
+- M2a.5 isolated: 20/20 passed in 0.13s (首轮 19 passed/1 failed 因测试用例本身违反 NarrativeParagraph schema, 删除非法测试后 20/20)
+- Full suite: **265 passed + 8 skipped in 4.54s** (245 + 20 new)
+
+### Decision Notes
+- Per **plan §282-286 + 用户决策 A**: ORM `BindingMethod` enum 加 `HINT_UNIFORM` 而非 algo 层自造 enum, 单一真相源避免 algo/ORM/JSON 三处定义漂移
+- Per **plan §M2a.5 不做的事**: 不用 evidence_keywords 反向检索, 不做 BM25 / 字符级匹配, 不区分 fallback 和正常 binding (fallback_count=0) — 留给 M2b
+- **Strict inequality 边界设计**: shot 重叠用 `s.start < seg_end and s.end > seg_start` 而非 `<=/>=`, 边界对齐时不会重复匹配 (test_three_sentences_three_shots_one_each 验证)
+- **Empty paragraph 静默跳过**: NarrativeParagraph.sentences=[] 不抛错, 与 NarrativeIR.iter_sentences() 行为一致
+- **元教训**: 写测试用例前要先了解被测对象的入参契约 (NarrativeParagraph.__post_init__ 已校验 approx_source_start_sec ≥ 0), 否则会写出永不可达的"防御性测试", 反而误导后续开发者
+
+### Next
+M2a.6 Scripting Stage handler — 串联 LLM + 绑定 + Timeline 序列化 (预估 1.5d): 把 M2a.1-M2a.5 全部串接成 PipelineRunner 可调度的 stage handler, 含 8 milestone 进度上报, K7/K8 contract enforcement, K9 cleanup llm_calls/, 与 ingest/index handler 同样的 contract (entrypoint marks RUNNING, handler self-marks DONE).
 ## 2026-05-05 (Session 15: M2a.4 JSON repair + retry decorator implementation)
 
 ### Trigger

@@ -794,3 +794,42 @@ try_repair_json('Here is the JSON: {"a":1, "b":2,} done.') # → {"a": 1, "b": 2
 
 ### 下一步
 M2a.5 简化版绑定算法（预估 0.8d）：按 `paragraph_hint` 时间区间贪心；`BindingMethod` enum 含 EVIDENCE_LOWCONFIDENCE 预留枚举值（plan-1 已预留，避免 M2b.2 升级时跨版本兼容性问题）。
+
+
+---
+
+## Session 16 (2026-05-05) — M2a.5 naive greedy binder implementation complete (HINT_UNIFORM + 20 unit tests passed)
+
+### 触发
+用户输入 "继续" 后进入 M2a.5。预读发现 design mismatch (plan 要 HINT_UNIFORM 但 ORM 没有此 enum 值), 按 brainstorming skill 一次一问, 用户选 Option A (ORM 加 HINT_UNIFORM + algo 层用同一 enum, 单一真相源, 改动 2 行)。
+
+### 实施过程
+1. **m2a5-1**: 修改 `src/autoclip/models/timeline.py` BindingMethod enum
+   - 加 `HINT_UNIFORM = "hint_uniform"` 在 EVIDENCE 之前 (按枚举出现顺序排列: M2a → M2b)
+   - 顺手把 FALLBACK_UNIFORM 注释从 "M2a baseline / M2b when resolve returns None" 改为 "M2b when resolve returns None (fall back to paragraph hint)" — 现在 M2a baseline 的位置由 HINT_UNIFORM 占据
+   - 验证: `[m.value for m in BindingMethod]` = `['hint_uniform', 'evidence', 'evidence_lowconfidence', 'fallback_uniform']`
+2. **m2a5-2**: 创建 `src/autoclip/algo/greedy_binder.py` (213 行)
+   - 数据结构: BoundSegment + BindingResult, 都是 frozen dataclass + to_dict()
+   - 算法: bind_naively() 6 步 (video_end → clamp → uniform split → min_segment_sec expand → shot overlap → nearest fallback)
+   - **私有辅助函数**: `_video_end_sec` / `_clamp_window` / `_shots_overlapping` / `_nearest_shot_id` — 抽取每步逻辑便于单元测试 (虽然主算法只有一个 public entry, 但分离逻辑便于阅读 + 后续 M2b 复用 _shots_overlapping)
+   - **核心设计**: shot 重叠用 strict inequality (`s.start < seg_end and s.end > seg_start`) 不用 `<=/>=`, 边界对齐时不会重复匹配
+   - **fallback_count 始终 0**: M2a baseline 只有 HINT_UNIFORM 一种策略, 没有"先尝试再降级"的两阶段, 所以 fallback_count 字段虽然存在但永远是 0; M2b post-validation 时才会有真正的 fallback 计数
+   - **smoke test 验证**: paragraph [10,40] 3 句 / 3 shots [(0,15) (15,30) (30,45)] → 输出 [10,20]:[0,1] / [20,30]:[1] / [30,40]:[2], fallback_ratio=0.0, 全部 hint_uniform ✅
+3. **m2a5-3**: 创建 `tests/unit/test_greedy_binder.py` (303 行, 20 用例 / 9 测试类)
+   - 首轮 19 passed / 1 failed: `test_paragraph_start_negative_clamped_to_zero` 触发 NarrativeParagraph.__post_init__ 校验 (approx_source_start_sec=-10 < 0 raise ValueError)
+   - **诊断**: 不是 binder bug, 是测试用例本身违反 NarrativeParagraph schema 约束 — _clamp_window 处理负数的逻辑虽存在, 但永远不会被实际数据触发 (上游 NarrativeIR 已校验)
+   - **修复**: 删除非法测试, 替换为 `test_paragraph_window_within_video_bounds_no_clamp` (sanity check 窗口完全在 [0, video_end] 内不钳制), 既保留 ParagraphClamp 测试类的 2 用例数, 又不写"永不可达的防御性测试"
+   - 修复后 20/20 passed in 0.13s
+
+### Commit
+- `✨feat : M2a.5 implementation — naive greedy binder (HINT_UNIFORM) + 20 unit tests (20/20 passed)` → commit `a7f8cb5`
+- 3 files changed, 558 insertions(+), 1 deletion(-)
+- pytest: **265 passed + 8 skipped in 4.54s** (245+20)
+
+### 元教训
+**测试用例必须遵守被测对象的入参契约**: 写 `test_paragraph_start_negative_clamped_to_zero` 时, 我假设 binder 会处理负数 paragraph start, 但忽略了 NarrativeParagraph dataclass 的 __post_init__ 已经把 "approx_source_start_sec ≥ 0" 写成硬约束 — 这种"防御性测试"永远不会被实际数据触发, 反而误导后续开发者以为 binder 应当处理这种 case. 正确做法: 写测试前先 `cat NarrativeParagraph` 看 __post_init__, 把不可达的 case 删除而非保留一个永远 fail 的测试 (或更糟: 在 binder 里加一个永远不会被调用的 negative-handling 分支).
+
+**单一真相源胜过多处复用**: 起初我也想过让 algo 层自造一个 lighter dataclass enum (避免引入 ORM 依赖), 但用户决策 A 直接复用 models.timeline.BindingMethod 是对的 — 三处枚举值 (algo 输出 / ORM 持久 / JSON 序列化) 一旦漂移, 调试成本远大于多一行 import.
+
+### 下一步
+M2a.6 Scripting Stage handler — 把 M2a.1-M2a.5 全部串接成 PipelineRunner 可调度的 stage handler (预估 1.5d): 8 milestone 进度上报 / K7 entry check (token 预估 > 32k 抛 NarrativeIRTooLargeError) / K8 LLM 失败 stage→FAILED / K9 cleanup llm_calls/ / state.json 直读 target_duration_sec + style_preset (Q5=A+C 决策).
