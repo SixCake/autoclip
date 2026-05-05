@@ -1,15 +1,15 @@
 {
   "project": "autoclip",
-  "version": "0.8.0-executing",
+  "version": "0.10.0-executing",
   "stage": "executing",
-  "phase": "M2a.6-implementation-COMPLETE (Scripting handler 串联 LLM + 绑定 + Timeline; 31 new tests passed; total pytest 296 passed + 8 skipped; M2a 全部 6 个子任务完成; next: M2a 端到端真实视频验收 OR 直接进 M2b 高级绑定算法)",
-  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
+  "phase": "M2a-fix 里程碑 doc-only 落盘 COMPLETE (Session 20 续 + 8 角度 critique 19 项 P0 修正); plan.md v0.7 / M2a-fix-narrative-style.md 372 行 / M2b 头部 v0.7 修订提示已加 / .context 三件套同步; ready for Day 0 = M2a-fix.1 设计规约启动",
+  "current_focus": "M2a-fix.1 (Day 0, 1.1d): design.md §17.5 两阶段 LLM 章节 + §17.6 UX 4 意图按钮规约 + 三层封闭枚举集 + fallback 矩阵 + 静态默认三元组 + src/autoclip/algo/style_violations.py R1-R6 正则扫描器 (Day 1 hard gate)",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
-  "design_doc_lines": 2282,
-  "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
+  "design_doc_lines": 2369,
+  "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
   "plan_master_doc": "docs/plans/2026-05-04-autoclip-plan.md",
-  "plan_master_lines": 222,
-  "plan_master_version": "v0.2 (本地化+角色推断 adhoc)",
+  "plan_master_lines": 238,
+  "plan_master_version": "v0.7 (Session 20 brainstorming Q1-Q8 + 8 角度 critique 19 项 P0 修正; M2a-fix 里程碑插入 M2a/M2b 之间; M2b 拆分 light/full; 2026-05-05)",
   "plan_subdocs": {
     "M1": {
       "path": "docs/plans/tasks/M1-infrastructure.md",
@@ -35,17 +35,19 @@
     },
     "M2a": {
       "path": "docs/plans/tasks/M2a-scripting-main.md",
-      "lines": 304,
+      "lines": 491,
       "tasks": 6,
       "estimate_days": 5.5,
-      "status": "pending"
+      "status": "COMPLETE-but-style-deviation-found (commit eecab0f + e883433; Session 19 端到端真实视频验收 PASS; narrative_ir.text 风格根本性偏离 design.md §8.3.2 → 触发 M2a-fix 独立里程碑承接)"
     },
     "M2b": {
       "path": "docs/plans/tasks/M2b-scripting-robust.md",
-      "lines": 282,
-      "tasks": 5,
-      "estimate_days": 6.0,
-      "status": "pending"
+      "lines": 328,
+      "tasks": 1,
+      "estimate_days": 0,
+      "status": "conditionally_pending (v0.7 拆分: light 已并入 M2a-fix.5; full 仅当 M2a-fix.5 决策报告建议启动时执行 0d 或 4d; M2b.1-M2b.5 5 项内容描述保留作技术参考, 进度计数归 0/1)",
+      "estimate_days_min": 0,
+      "estimate_days_max": 4.0
     },
     "M3": {
       "path": "docs/plans/tasks/M3-render-web-compliance.md",
@@ -60,42 +62,71 @@
       "tasks": 5,
       "estimate_days": 5.5,
       "status": "pending"
+    },
+    "M2a-fix": {
+      "path": "docs/plans/tasks/M2a-fix-narrative-style.md",
+      "lines": 372,
+      "tasks": 5,
+      "estimate_days": 6.7,
+      "status": "pending (Day 0 待启动)",
+      "tasks_list": [
+        "M2a-fix.1 设计规约+数据契约+KPI框架 (1.1d)",
+        "M2a-fix.2 架构骨架+movie_summary+两阶段LLM (1.5d)",
+        "M2a-fix.3 扩展 shortdrama_推流+anime_情绪 (1d)",
+        "M2a-fix.4 CLI+双 schema bump+缓存 (1d)",
+        "M2a-fix.5 M2b-light+batch judge+M2b-full 决策 (2.1d)"
+      ],
+      "p0_corrections_count": 19,
+      "p0_corrections_breakdown": "数据契约 5 (C1-C5) + KPI 测量 4 (K-style-1/2/3/4) + 成本性能 3 (P1-P3) + 容错 3 (F1-F3) + UX 架构 4 (U1/U2/A1/A2)",
+      "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识"
     }
   },
-  "total_tasks": 33,
-  "tasks_completed_overall": 8,
-  "completion_pct": 24.24,
+  "total_tasks": 34,
+  "tasks_completed_overall": 14,
+  "completion_pct": 41.18,
   "execution_strategy": "subagent-driven (in-session). M1 milestone done. Next: M1 e2e acceptance (manual curl test) then M2a kickoff (Scripting main flow, 6 tasks, W2)",
   "next_task": {
-    "id": "M1-e2e",
-    "title": "M1 milestone end-to-end acceptance (manual)",
-    "subdoc": "docs/plans/tasks/M1-infrastructure.md §M1.8 验收标准",
-    "manual_steps": [
-      "1. uvicorn autoclip.api.main:app --reload (or similar entrypoint)",
-      "2. curl -X POST http://localhost:8000/api/jobs -F 'video=@5min-clip.mp4' -F 'target_duration_sec=60'",
-      "3. poll GET /api/jobs/<id> until both ingest + index stages report DONE",
-      "4. assert wall-clock < 2 minutes (M3 Pro / large-v3 baseline)",
-      "5. assert <data_dir>/<job_id>/shots.json exists with n_shots >= 1",
-      "6. assert <data_dir>/<job_id>/asr.json exists with sentences != []",
-      "7. assert <data_dir>/<job_id>/audio.wav does NOT exist (K9 verification)"
+    "id": "M2a-fix.1",
+    "title": "M2a-fix.1 设计规约 + 数据契约 + KPI 测量框架 (Day 0, 1.1d)",
+    "subdoc": "docs/plans/tasks/M2a-fix-narrative-style.md#m2a-fix1",
+    "deliverables": [
+      "docs/plans/2026-05-04-autoclip-design.md 修订: §17.1 升级为 5 种品类化预设矩阵 + §17.4 加 fallback 矩阵 + 新增 §17.5 两阶段 LLM 设计章节 + §17.6 UX 4 意图按钮规约",
+      "三层封闭枚举集落入 design.md §17.5: genre(10 值) + tone(7 值) + narrative_intent(5 值), 每枚举值配 50 字描述符 + 1 个示例",
+      "fallback 矩阵: (genre, narrative_intent) → preset 映射表",
+      "静态默认三元组: {genre=其他, tone=温和讲解, narrative_intent=剧情速览} + 50 字 justification",
+      "src/autoclip/algo/style_violations.py: R1-R6 正则扫描器 (零 LLM 成本, Day 1 hard gate)",
+      "tests/unit/test_style_violations.py: 12+ 用例, 对 job_20260505_144455 的 12 句反例命中率 100%"
     ],
-    "estimate_days": 0.2,
+    "p0_corrections_addressed": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "K-style-1",
+      "F1",
+      "U1",
+      "U2"
+    ],
+    "estimate_days": 1.1,
     "blocks": [
-      "M2a kickoff (Scripting main flow needs verified shots.json + asr.json contracts)"
+      "M2a-fix.2",
+      "M2a-fix.3",
+      "M2a-fix.4",
+      "M2a-fix.5",
+      "M3.7 (UX 设计依赖)"
     ],
-    "system_deps": [
-      "ffmpeg/ffprobe",
-      "scenedetect",
-      "faster-whisper weights (~1.5GB medium / 3GB large-v3)"
-    ]
+    "verification": "本任务为 doc + 1 个新 src 模块, 不动现有 pipeline; 全套 pytest 净增 12+ 用例全绿即可"
   },
   "next_milestone": {
-    "id": "M2a",
-    "title": "Scripting main flow",
-    "subdoc": "docs/plans/tasks/M2a-scripting-main.md",
-    "tasks": 6,
-    "estimate_days": 5,
-    "depends_on": "M1 e2e acceptance must pass first to lock shots.json + asr.json schemas"
+    "id": "M2a-fix",
+    "title": "M2a 二创风格修正 + M2b-light kickoff",
+    "subdoc": "docs/plans/tasks/M2a-fix-narrative-style.md",
+    "tasks": 5,
+    "estimate_days": 6.7,
+    "depends_on": "M2a 已完成 (commit e883433)",
+    "p0_corrections": 19,
+    "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识"
   },
   "previous_task": {
     "id": "M1.8",
@@ -354,7 +385,15 @@
     "19bebfd ✨feat : M2a.3 implementation — Narrative IR data model + plot_summary style prompt + 7 unit tests (7/7 passed) \t- algo/narrative_ir.py: added NarrativeSentence/NarrativeParagraph/NarrativeIR dataclasses with iter_sentences()/total_sentences() \t- prompts/narrative_ir.py: build_narrative_ir_messages() with role-aware constraints + parse_narrative_ir_response() JSON parser \t- prompts/style_presets/plot_summary.py: STYLE_NAME/STYLE_DESCRIPTION/FEW_SHOT_EXAMPLE exports for third-person objective narration \t- tests/unit/test_narrative_ir_parse.py: 7 test cases covering valid IR/schema error/iter_sentences flattening",
     "42cb37f ✨feat : M2a.4 implementation — JSON repair (5-strategy) + retry_with_repair decorator + 35 unit tests (35/35 passed)",
     "a7f8cb5 ✨feat : M2a.5 implementation — naive greedy binder (HINT_UNIFORM) + 20 unit tests (20/20 passed)",
-    "c6a3cd5 ✨feat : M2a.6 implementation — Scripting stage handler 串联 LLM + 绑定 + Timeline (31 new tests passed; full pytest 296+8s)"
+    "c6a3cd5 ✨feat : M2a.6 implementation — Scripting stage handler 串联 LLM + 绑定 + Timeline (31 new tests passed; full pytest 296+8s)",
+    {
+      "sha": "eecab0f",
+      "msg": "✨feat : M2a v0.6 self-review revisions — K7 dual-gate + estimate field + progress collapse + evidence cleanup",
+      "files": 10,
+      "lines": "+354/-78",
+      "session": "Session 18 (吸收方案 — Session 17 doc + Session 18 src 一并 commit)",
+      "test_status": "305 passed + 8 skipped + 0 failed"
+    }
   ],
   "test_status": {
     "total_tests": 187,
@@ -386,7 +425,10 @@
       "test_index.py (integration, default skip)": 2,
       "_total_new": 33,
       "_self_check_additions": "Round 3 +2 (RUNNING marker + OSError propagate, then Round 4 renamed/inverted RUNNING test → does_not_redundantly_mark_running, kept OSError); Round 6 +2 (empty-ASR positive + nonempty-ASR negative reverse-assertion pair)"
-    }
+    },
+    "latest_pytest": "305 passed + 8 skipped + 0 failed in 9.73s",
+    "last_run_session": "Session 18 (M2a v0.6 实施后)",
+    "net_delta_vs_prev": "+9 cases (K7 output gate 7 + progress relaxed contract 1 + e2e estimate invariant 1)"
   },
   "kpi_tracking": {
     "K1_binding_accuracy": {
@@ -478,5 +520,5 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-05T13:04:34.616037+08:00"
+  "updated_at": "2026-05-05T06:17:40.445411+00:00"
 }

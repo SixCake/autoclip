@@ -900,3 +900,370 @@ M2a 阶段技术验收已全部完成 (296/8 pytest 全绿). 剩两个选项:
 2. **直接进 M2b**: 高级绑定算法 (BM25 反向检索 / evidence-based binding / post-validation / multi-style preset). M2a baseline 已能跑通端到端, 但 binding 质量未验证. 如果直接进 M2b, 后续 KPI K3 (fallback_ratio < 0.3) 才有真实数据评估.
 
 建议方案: 先做端到端真实视频验收 (1-2h, 验证 M2a 整体可用性), 再启动 M2b brainstorming. 如果用户希望快速推进可直接进 M2b, M2a 验收推迟到 M3 web UI 可视化时一并做.
+
+
+---
+
+## 2026-05-05 — Session 17: M2a self-review brainstorming + adhoc plan v0.6 doc-only landing (路径 A)
+
+### 触发
+用户在 M2a.5 完成 / M2a.6 实现期内（scripting.py 405 行 staged 未 commit）连发三问：
+1. "请问当前方案是否存在过度设计"
+2. "我需要你从整体角度思考，当前方案是否合理，算法逻辑是否正确"
+3. "执行路径A, 不要改代码"
+
+### 我的初轮诊断 (回答前两问)
+- **过度设计 3 处**: ① M2a.6 的 8 个进度里程碑 + 单测验证调用顺序 (其中 0.65 是 dead milestone) ② BindingMethod 预留 EVIDENCE_LOWCONFIDENCE 给 M2b ③ _invoke_llm_with_repair 把 retry_with_repair 装饰器嵌套在闭包里
+- **算法 3 处缺陷**: ① BoundSegment 没有 target-side 时长 (M2a 跑出的 timeline.json 下游 M3 拿到"96s 原片素材"却不知该裁成几秒) ② K7 阈值 32k tokens 在 M2a 是死分支 (DeepSeek 128k context + ASR 截 40k 字符 ≈ 18k tokens, 永远到不了) + max_tokens=8000 硬编码导致 600s 档位 100% 失败 ③ evidence_keywords 在 M2a 是 dead data (prompt 让 LLM 输出但 bind_naively 完全不消费)
+
+### Brainstorming 流程 (rule 892.md 强制逐个提问)
+**决策点 1 — BoundSegment target-side 时长归属**:
+- 4 备选: A=M2a 加 estimate / B=不加, M3 完全负责 / C=按目标占比裁短 source 窗口
+- 我倾向 B (避免两套时长混淆), 用户选 A "可以先预填写时长, 再 M3 修正"
+- 收敛 3 个子选择: 1.1=b 字数加权 / 1.2=b `target_duration_sec_estimate` 仅进序列化层 / 1.3=同意验收措辞收紧
+
+**决策点 2 — K7 阈值卡点位置**:
+- 4 备选: a=双闸门 (输入 90k + 输出动态) / b=K7 不动只改 max_tokens / c=删 K7 改截断+警告 / d=限 ≤300s 档位
+- 用户选 a (我推荐): 真正修了 P0 bug, K7 重新有意义 (4h+ 视频会触发), 与 K8 硬失败精神一致, 不缩功能
+
+**决策点 3 — evidence_keywords M2a 处置**:
+- 4 备选: a=删 prompt 字段保留 / b=现状不动 / c=提前做轻量反向校验 / d=prompt 加 mvp_skip 注释
+- 用户引入新规则约束: "Minimum code that solves the problem. Nothing speculative. ... If you write 200 lines and it could be 50, rewrite it. Ask yourself: 'Would a senior engineer say this is overcomplicated?' If yes, simplify."
+- 用规则倒推: 方案 a 是唯一通过尺子的 (b/c/d 全部违反 "no features beyond what was asked" 或 "no abstractions for single-use code" 或 "no flexibility that wasn't requested")
+- 用户回 "方案a, 进入修订"
+
+### 文档落地 (4 batches doc-only, 累计 105 lines insert + 1 line delete)
+**Step 1**: docs/plans/2026-05-04-autoclip-plan.md 第 9 节变更日志加 v0.6 行 (+1436 chars / 1 row)
+**Step 2**: docs/plans/tasks/M2a-scripting-main.md 4 处 patch:
+- patch 1: §M2a.3 evidence_keywords 删 prompt + dataclass 保留
+- patch 2: §M2a.5 加 target_duration_sec_estimate 序列化层补充
+- patch 3: §M2a.6 K-clause 段后追加 v0.6 修订 4 项 (双闸门 K7 + estimate 字段 + 进度 8→4 收敛 + 验收措辞收紧)
+- patch 4: 顶部 Milestone 验收 checklist 措辞收紧 + 加 estimate 误差 ≤5% 验收项
+**Step 3**: docs/plans/tasks/M2b-scripting-robust.md 3 处 patch:
+- patch A: §M2b.5 prompt v2 调优方向加回 evidence_keywords 输出要求 (含 token 预算回升 80→120 同步)
+- patch B: §M2b.5 验收 checklist 加 v0.6 新增 + 实施顺序约束 (prompt 必须早于 M2b.1/M2b.2 集成测试)
+- patch C: 顶部 Milestone 验收 checklist 加 estimate 字段 passthrough 责任声明
+**Step 4**: docs/plans/2026-05-04-autoclip-design.md §17.4 末尾补 target_duration_sec_estimate vs target_*_sec 字段演化表 (M2a → M3.2 → M3.3 三阶段)
+
+### 校验结果
+- v0.6 锚点 grep: plan 1 / M2a 14 / M2b 8 / design 2 (全部命中)
+- target_duration_sec_estimate 跨 4 文档对齐 (符合契约一致性)
+- INPUT_TOKEN_BUDGET_K7 仅 M2a 出现 + M2b 配套提到 narrative_ir_max_tokens 系数回升 (内部矛盾排除)
+- git diff --stat: 4 files changed, 105 insertions(+), 1 deletion(-) — 全部 docs/
+
+### 为什么不改 src/ 代码 (用户明确指令 "路径A, 不要改代码")
+- 当前 git status: scripting.py / tokens.py / test_scripting_handler_progress.py / test_tokens.py 都已 staged 未 commit
+- v0.6 的 ~10 行净增 + ~10 行净减恰好可在同一 commit 内吸收 (避免独立 commit 引入 history 噪音)
+- 实施 task 留给下一轮: M2a.6 实现期一并落地 v0.6 微调
+
+### 元教训
+**"是否过度设计"是诊断问题, "minimum code" 是收敛规则**: 第一轮自评提了 3 处过度 + 3 处算法缺陷, 但没给出"该怎么改"的硬约束 — 用户在决策点 3 引入 "Minimum code that solves the problem. Nothing speculative." 规则后, 4 个备选立即从"看哪个更合适"变成"按规则只有 1 个能通过", 决策时间从来回讨论几轮收敛到 1 轮就 close. 关键洞察: 当 brainstorming 陷入"abc 各有取舍"的状态时, 最有效的不是继续陈列利弊, 而是引入一条具体的硬约束规则 (如 YAGNI / minimum code / no speculation) 让备选自然分层.
+
+**self-review 在实现期内的价值**: 本次发现的 3 处算法缺陷 (estimate 缺失 / K7 死分支 / evidence dead data) 全部是 e2e 阶段才会暴露的"沉默 bug" — 600s 档位 100% 失败这种事如果跑到 M4 验收才发现, 至少要损耗 2-3 天来回归. 用户在 M2a.6 实现期主动触发 self-review, 是 LIM#9 "downstream consumer breaks" 的反向应用 — 不等下游消费者 break 才回头修 plan, 而是在实现期内主动盘点 plan 内部矛盾.
+
+### 下一步
+- M2a.6 实现期吸收 v0.6 微调 (10 行净改 + commit 前完成)
+- M2a 端到端真实视频验收 (B2=B 决策剩余手动部分) 或直接进 M2b kickoff
+
+
+---
+
+## 2026-05-05 — Session 18: M2a v0.6 src/ 实施 + 一并 commit (吸收方案)
+
+### 触发
+用户回复 "吸收方案（推荐）" — 选择 Session 17 末尾的 3 个候选动作之一: 让 Session 17 doc-only 收敛的 v0.6 修订实际落到 src/ 代码, 并和 M2a.6 实现 (上一轮 staged 未 commit 的 scripting.py / utils/tokens.py / 测试文件) 一并 commit, 避免独立 commit 引入 history 噪音.
+
+### 执行流程 (rule 892.md 第三阶段路由后, 进入具体执行)
+**Step 0 — read 阶段 (避免压缩历史改错)**:
+并行 read 4 src + 2 test 文件: prompts/narrative_ir.py / utils/tokens.py / pipeline/scripting.py / tests/unit/test_tokens.py / tests/unit/test_scripting_handler_progress.py.
+
+**Step 1 — patch 1 (prompts/narrative_ir.py, -3 lines)**:
+- SYSTEM_PROMPT_TEMPLATE schema 删 evidence_keywords 行 (4 字段 → 3 字段)
+- 关键约束 4 条 → 3 条 (删原第 2 条 evidence_keywords 说明)
+- parse_narrative_ir_response 的 .get("evidence_keywords", []) 保留 (M2b prompt v2 加回时零迁移)
+
+**Step 2 — patch 2 (utils/tokens.py, +55 lines)**:
+- module docstring 32k → 90k 改写 + 新增 v0.6 修订说明
+- 新增常量 INPUT_TOKEN_BUDGET_K7 = 90000 (旧名 TOKEN_BUDGET_K7 = 32000 直接删)
+- 新增函数 calc_narrative_ir_max_tokens(target_sentences) -> int = clamp(target_sentences*80+1000, 2000, 16000)
+- 添加 ValueError 处理 target_sentences < 0
+
+**Step 3 — patch 3 (pipeline/scripting.py, +84/-23 lines, 11 sub-patches A→K)**:
+- A: docstring milestones 8 → 4
+- B: K-clause docstring K7/K10 描述更新
+- C: import 加 INPUT_TOKEN_BUDGET_K7, calc_narrative_ir_max_tokens
+- D: 删 TOKEN_BUDGET_K7 + NARRATIVE_IR_MAX_TOKENS 常量 (NARRATIVE_IR_TEMPERATURE 保留)
+- E: K7 输入闸门 estimate_tokens > 32000 → > INPUT_TOKEN_BUDGET_K7 (90000) + ">2h" → ">4h"
+- F-G: plot_outline 删 0.10 START 节点, 0.25 DONE → 0.30 DONE
+- H: narrative_ir 删 0.30 START + 加 target_sentences/ir_max_tokens 动态算
+- I: narrative_ir DONE 0.60 → 0.65, 删 0.65 dead milestone, 删 0.80 binding START
+- J: timeline.json segments 列表推导式加 target_duration_sec_estimate (字数加权 + total_chars or 1 防 ZeroDivision)
+- K: step 编号 6→5, 7→6 修正
+
+**Step 4 — patch 4 (tests/unit/test_tokens.py, +85/-25 lines)**:
+- TestK7Boundary 重命名为 TestK7InputGate (4 用例: 常量值校验 + 90k 边界 3 个)
+- 新增 TestK7OutputGate 7 用例: 0/10/50/100/200/1000 sentences 边界 + 负数 ValueError
+- 关键用例 test_100_sentences_600s_archetype_no_clamp: 显式 assert > 8000 验证 v0.6 P0 修复有效
+
+**Step 5 — patch 5 (tests/unit/test_scripting_handler_progress.py, +79/-37 lines)**:
+- test_8_milestones_in_strict_order → test_4_milestones_in_correct_order (expected 4 个 RUNNING + DONE)
+- 新增 test_progress_at_least_4_milestones_with_done_complete (面向未来弱化契约)
+- TestK7TokenBudget → TestK7InputGate, 32k → 90k, 大输入构造改 3000 sentences (ASR 行 overhead 让总 token ~133k)
+
+**Step 6 — pytest 验证 (第 1 次)**:
+- 局部跑 test_tokens.py + test_scripting_handler_progress.py: 35 passed
+- 全套 pytest: 304 passed, 1 failed
+- 1 个 failure: tests/integration/test_scripting_e2e.py::TestTimelineJSONSchemaE2E::test_timeline_json_full_nested_schema — 集合相等 set(seg.keys()) == expected_seg_keys 失败, "Extra: target_duration_sec_estimate" — 完全在意料中, v0.6 schema 升级了 e2e 测试断言没同步
+
+**Step 7 — patch 6 (tests/integration/test_scripting_e2e.py, +15 lines)**:
+- expected_seg_keys 集合加 target_duration_sec_estimate
+- 加每 segment estimate > 0 断言
+- 加 sum(estimate) ≈ state.target_duration_sec ≤5% drift 守恒断言 (对齐 v0.6 验收标准 #9)
+
+**Step 8 — pytest 全套回归 (第 2 次)**:
+- 305 passed + 8 skipped + 0 failed (vs 上轮 296 passed; 净增 9 个用例)
+- 0 regression, 全绿
+
+**Step 9 — git commit (commit hash eecab0f)**:
+- 按 rule 250.md: ✨feat 图标 + 结构化英文 + 排除 .context/* 隐藏文件 + 不主动 push
+- staged 范围: 10 files (3 src + 3 tests + 4 docs)
+- 未 staged: 3 个 .context/* (本轮 worktree-save 之后再处理) + 2 个 untracked scripts/ (用户独立未追踪文件保持不动)
+- commit message 详细列出 5 大类改动 + tests + docs + 测试结果, 共 60+ 行 sub-bullets
+
+### 文件变更汇总
+- 10 files changed, +354 / -78 lines (commit eecab0f)
+- src: 3 files (scripting.py +61 / tokens.py +55 / narrative_ir.py -3)
+- tests: 3 files (test_tokens.py +60 / test_scripting_handler_progress.py +42 / test_scripting_e2e.py +15)
+- docs: 4 files (plan / design / M2a / M2b, 累计 +106 行 — 来自 Session 17 doc-only 阶段)
+
+### 元教训
+**预测准确性的反向校验**: Session 17 末尾我预估 v0.6 改动量 "约 +10 行 / -10 行 (基本持平)", 实际 src/ 净改动 +109/-23 (≈ 5 倍偏差). 偏差来源:
+1. tokens.py 的 calc_narrative_ir_max_tokens 函数本体 + 文档注释 = +35 行 (我预估只算了"写个 clamp 函数 ~5 行")
+2. scripting.py 的 v0.6 修订段在 docstring 加了 8 行解释 + K7 错误消息更新 + 进度变更 5 处 mark_stage 调整
+教训: brainstorming 阶段的"改动量预估"应该把"必要的注释/docstring 同步"算进去, 不只算可执行代码; 否则会让 commit message 的 "工时影响 0d" 看起来过于乐观.
+
+**测试断言的 schema 升级是隐性回归来源**: e2e 测试的 set(seg.keys()) == expected_seg_keys 严格相等断言, 让 timeline.json 加 1 个新字段必然导致 1 个 failure. 这种"集合严格相等"的契约比"集合包含 (>=)"更脆弱, 但反过来"严格相等"能在 schema 静默扩展时立刻报警 (本次就成功捕获了我没想起去看 e2e 测试). 取舍:
+- 严格 == (本次): 强契约, schema 任何扩展立刻 fail-fast — 适合"M2a baseline 阶段, schema 变化都需要明确决策"
+- 包含 >= (M2b 切换后可考虑): 弱契约, 允许下游消费者无感扩展 — 适合"M2b 之后多 binder 版本共存"
+本次保留严格相等, 同时追加了"sum invariant ≤5%" 这种业务级断言, 是双层防护.
+
+**TDD fail-first 在契约升级场景的省时**: 第 1 次跑全套 pytest 直接拿到 1 failure (e2e schema 严格相等检查), 4 行 stack trace 就定位到精确位置 (整个调试时间 < 30 秒). 如果不跑全套只跑 unit, 这个 failure 会推迟到下一轮真实视频验收时暴露 (用户反馈 "timeline.json 长得不对" → 我再回头查 → 至少损耗 30 分钟). 全套 pytest 9.7 秒, 性价比极高, **每次大改动后都要跑全套**, 不要因为"局部测试已绿"就跳过.
+
+### 下一步候选 (Session 17 提的剩余 2 个动作)
+1. **M2a 端到端真实视频验收** (B2=B 决策剩余手动部分): 5min 短片跑 ingest+index+scripting 全链路, 肉眼检查 timeline.json 合理度 ≥ 50%; 现在 scripts/_realvideo_dispatcher.py + test_scripting_realvideo.sh 已就位 (untracked). 需用户提供测试视频路径
+2. **直接进 M2b kickoff brainstorming**: 高级绑定算法 (BM25 反向检索 / evidence-based binding / post-validation / multi-style preset). M2a baseline 已能跑通端到端, 但 binding 质量未验证
+
+建议: 先做端到端真实视频验收 (1-2h, 验证 M2a 整体可用性 + v0.6 修复在真实场景生效), 再启动 M2b brainstorming.
+
+---
+
+## Session 18 (2026-05-05) — M2a 端到端真实视频验收完成 (deepseek 路径全绿) + v0.6 微调实现期落地
+
+### 总览
+M2a 阶段所有技术工作 100% 完成，包含两块：
+1. **v0.6 微调实现期落地** (commit `eecab0f`): K7 双闸门 + estimate 字段 + progress 8→4 + evidence cleanup（10 files, +354/-78 lines, pytest 305+8s）
+2. **M2a 端到端真实视频验收** (B2=B 决策剩余手动部分, 全 A 推荐方案): 113s test.mp4 跑通 INGEST→INDEX→SCRIPT 三阶段 (154s), timeline.json 完整产出, K3 callback ×2 落盘, fallback_ratio=0%, plot_outline 准确识别为「Fun Animal Sounds」教育类视频
+
+### Workflow
+- 主 query: "方案A, 我已经补充了DEEPSEEK_API_KEY到.env文件，以及视频地址：~/Downloads/test.mp4"
+- 全 A 决策组合: 三阶段全跑 / 手动 dispatch / target_duration_sec=60 / deepseek 默认 / job_dir=data/realvideo_test/ / tiny model (实际跑了 large-v3, 见 bug #2) / 自动验收报告 / 保留产物
+- 5 个 todo: 写脚本 → 语法检查 → 实跑 deepseek → 验收报告 → worktree-save
+
+### 关键产出 (Files)
+- **scripts/test_scripting_realvideo.sh** (120 行 shell): 参数解析 + .env 校验 + ffmpeg 检查 + HF mirror + provider/whisper env 注入 + dispatch 调用
+- **scripts/_realvideo_dispatcher.py** (185 → 240 行): bootstrap state.json + 3 stage spawn dispatch + acceptance report (4 步)
+- **data/realvideo_test/job_20260505_133657/** (验收产物, .gitignore 自动忽略):
+  - raw/test.mp4 (2.9MB 原视频)
+  - normalized_low.mp4 (2.2MB 720p 25fps for shot detection)
+  - normalized_hd.mp4 (3.1MB 1080p for HD output)
+  - audio.wav (M3.6 cleanup 留 — 这次没跑 RENDER 故保留)
+  - shots.json (5 shots, scene threshold=27)
+  - asr.json (37 sentences, language=zh, faster-whisper large-v3)
+  - llm_calls/scripting_001.json (6020 bytes, plot_outline)
+  - llm_calls/scripting_002.json (11157 bytes, narrative_ir)
+  - timeline.json (11385 bytes, 4 acts × 15 segments)
+  - state.json (ingest/index/script DONE; assembly/render PENDING)
+
+### Bug 修复纪实 (2 个)
+
+**Bug #1: mp.Process spawn + heredoc/stdin → FileNotFoundError**
+- 症状: `python - <<PYEOF` 启动 Python, 内部 mp.Process(spawn) 在 macOS 子进程 re-import 时找 `/.../<stdin>` → `FileNotFoundError`
+- root cause: macOS spawn 子进程 _fixup_main_from_path 必须能 re-import "main", 但 stdin 源不可重 import
+- fix: 把 dispatcher 抽成独立 .py 文件 `scripts/_realvideo_dispatcher.py`, shell 改为 `.venv/bin/python .../_realvideo_dispatcher.py <args>` 调用
+- 元教训: macOS/Win spawn 模式下严禁用 stdin/heredoc 启动 multiprocessing 程序
+
+**Bug #2: env var 名错 (AUTOCLIP_WHISPER_MODEL_SIZE vs WHISPER_MODEL_SIZE)**
+- 症状: 脚本传 `tiny`, 日志显示 `Loading faster-whisper model: size=large-v3`
+- root cause: 我假设 `Settings` 字段有 `AUTOCLIP_` 前缀, 但 `pydantic-settings` 默认无 env_prefix, 字段 `whisper_model_size` 直接对应 env var `WHISPER_MODEL_SIZE`
+- fix: shell `s/AUTOCLIP_WHISPER_MODEL_SIZE/WHISPER_MODEL_SIZE/g`
+- 副作用: 实跑用了 large-v3 而不是 tiny → 反而验收数据更高质量 (37 句中文 ASR), 不影响验收结论
+- 元教训: 写脚本前用 `WHISPER_MODEL_SIZE=tiny .venv/bin/python -c "from autoclip.config import Settings; print(Settings().whisper_model_size)"` 实测验证 env var 名, 不要凭直觉假设
+
+**Bug #3: dispatcher acceptance report 字段名错 (4 处)**
+- 症状: 验收报告打印 `title=?`, `text=?`, `start_sec=0.00`, `shots=[]` (全是默认值)
+- root cause: dispatcher 假设了 `plot_outline.title/one_liner` + `seg.start_sec/end_sec/narrative_text/bound_shot_indices`, 但真实 schema 是 `title_guess/plot_summary` + `source_start_sec/source_end_sec/sentence_text/source_shot_ids`
+- fix: 一次性 file_replace 改 4 处 + 增加 binding_stats 直接读取 + 增加 main_characters/key_acts 详细展开 + 增加 narrative_ir.paragraphs 反查 topic + 增加肉眼检查 5 项验收提示
+- 元教训: dispatcher 字段名应对照 timeline.py 模型定义而非凭记忆
+
+### 验收数据 (deepseek 路径)
+```
+n_segments      : 15 (4 paragraphs × avg 3.75 sentences)
+total bound     : 113.40s (target was 60s) — 注: bind_naively 当前用 video_duration 而非 target, 这是 M2a baseline 设计
+fallback_count  : 0 (HINT_UNIFORM 无降级路径, 符合预期)
+fallback_ratio  : 0.00%
+plot_outline:
+  - title_guess  : Fun Animal Sounds
+  - genre        : 教育
+  - main_characters: 主持人 / 牛 / 鸭子 / 猫 / 狗 (5 个)
+  - key_acts: 4 个 (开场介绍 / 学牛鸭 / 学猫狗 / 总结告别)
+  - 时间段切分: 0-10s / 10-40s / 40-80s / 80-113.4s (合理)
+LLM 时间:
+  - plot_outline : 10.2s
+  - narrative_ir : 12.1s
+  - 总 SCRIPT    : 22s
+全链路时间:
+  - INGEST  : 12s (dual-track normalize + audio extract)
+  - INDEX   : 117s (5 shots 2s + ASR 115s, large-v3 真实跑分非 tiny)
+  - SCRIPT  : 22s
+  - 总计    : 154s wall time
+```
+
+### 质量观察 (非 bug, 待 M2b 改进)
+- ASR 识别出 37 句中文，但 narrative_ir 的 evidence_keywords 字段全是英文（"Hello", "Welcome", "cow says", "Moo"）—— 说明 LLM 对 ASR 文本做了语义抽取并保留了英文关键词。M2a v0.6 已经从 prompt 中删除了 evidence_keywords 输出要求（dead data），M2b.5 prompt v2 加回时需要明确约束「关键词必须来自 ASR 中实际出现的字词」
+- segment 时长分布: 5s/7.5s/10s/6.68s 不均匀，是 bind_naively 按 paragraph 内 evenly split 算法的结果（每个段落内 sentences 平均分时间），符合 M2a baseline 设计
+
+### 元教训
+1. **mp.Process spawn 子进程的 stdin 限制**: macOS/Win 严禁用 heredoc/stdin 启动 multiprocessing 程序, 必须独立 .py 文件
+2. **env var 命名永远要实测**: 不要假设 framework 的 env var 命名规则, `Settings().whisper_model_size` 之类字段必须实测才知道对应 `WHISPER_MODEL_SIZE` 还是 `AUTOCLIP_WHISPER_MODEL_SIZE`
+3. **dispatcher 字段名应对照模型定义而非凭记忆**: 4 处字段名 bug 全部因为我没去 read_file `models/timeline.py` 直接照抄字段名而是凭印象
+4. **e2e 验收 = M2a 整体可用性的"最终封口测试"**: 305 个单元/集成测试全绿不等于 e2e 可用 — 实跑暴露了 schema 演化追溯问题, dispatcher 字段名漂移是典型例子
+
+### 下一步
+M2a 阶段技术验收已 100% 完成。剩余两个选项:
+1. **M2b kickoff brainstorming**: 高级绑定算法 (BM25 反向检索 / evidence-based binding / post-validation / multi-style preset). 需要 5-10 步 brainstorming 确定 M2b 设计
+2. **dashscope 兜底路径手动验证**: 用户已配 DASHSCOPE_API_KEY, 跑 `./scripts/test_scripting_realvideo.sh ~/Downloads/test.mp4 60 dashscope tiny` 即可对比两个 provider 输出差异. 可作为 M2b kickoff 前的额外稳健性验证, 也可推迟到 M3 web UI 时一并做
+
+## Session 19 (2026-05-05): M2a v0.6 End-to-End Real-Video Acceptance COMPLETE
+
+**User Request**: "先做端到端真实视频验收"
+
+**Execution**: Ran `./scripts/test_scripting_realvideo.sh` with test video, target_duration=60s, provider=deepseek. New job: job_20260505_141111. All 3 stages completed in 40s.
+
+**Validation Results**:
+- ✅ K7 Dual-Gate: Input gate 427 tokens < 90000 budget; Output gate dynamic max_tokens=2000 for 10 sentences
+- ✅ target_duration_sec_estimate: All 20 segments have field, sum=60.00s, drift=0.00% (≤5% threshold)
+- ✅ Evidence keywords removed from prompt, zero migration needed
+- ✅ Progress convergence: relaxed contract validated (monotonic + ≥4 RUNNING calls)
+- ✅ Binding quality: 0 fallbacks, 100% hint_uniform
+
+**Status**: M2a v0.6 fully validated in real video scenario. Ready for M2b kickoff or M3 implementation.
+
+**Modified Files**:
+- `.context/changes.md`: Added Session 19 acceptance report
+- `.context/chat.md`: This entry
+- `.context/state.json`: Phase updated (pending git status sync)
+
+**No Code Changes**: Acceptance session only, no source code modifications beyond .context tracking files. Commit eecab0f remains HEAD.
+
+## Session 20 — 2026-05-05 15:30 ~ 16:30 (M2a 二创风格修正 brainstorming)
+
+### 触发
+用户审视 timeline.json (job_20260505_141111 / job_20260505_144455) 后给 P0 反馈："narrative_ir.text 是一堆狗屎，没人愿意看"。M2a 实现的是"百度百科剧情简介"，design.md §8.3.2 要的是"B 站头部影视解说 UP 主 + 二创视角"。要求暂停 M2b kickoff，先做 M2a 二创风格修正 brainstorming。
+
+### Brainstorming Q1-Q8 决议
+| 题 | 决议 | 摘要 |
+|---|---|---|
+| Q1 | D | 先写设计规约（可观测/可验证） |
+| Q2 | E | 混合架构：MVP 1 维 N 种预设 + 预留可扩展接口 |
+| Q3 | A | 3 种品类预设：shortdrama_推流 + movie_summary + anime_情绪 |
+| Q4 | F | 通用反模式 R1-R6 + 每预设 4-5 组 genre 分组 few-shot |
+| Q5 | F | CLI + state.json schema bump（提前到 M2a 修正阶段，5 字段一并迁移） |
+| Q6 | E | M2b 拆分：light 2d + 数据驱动决定 full 0/4d |
+| Q7 | D | 1+3 渐进交付（Day 1 movie_summary 端到端 → 后续扩展） |
+| Q8 | E | 两阶段 LLM：先推断 {genre, tone, narrative_intent} 再写文案 |
+
+### 用户关键修正
+> "风格要根据内容来，不是所有都需要吐槽"
+
+这条反馈让 Q8 从 D（Prompt 内嵌 genre 映射）升级到 E（两阶段 LLM 显式推断）。
+> "D 和 E 的区别是啥，深入思考"
+
+逼我重新对比后自我推翻——E 的可观测性与 Q1=D 的方法论一致。
+
+### 6 大反模式 R1-R6（由 timeline.json 反例归纳）
+R1 画面描述 / R2 流水账动作 / R3 复读对白 / R4 客观零情绪 / R5 第三人称冷叙述 / R6 缺二创视角
+
+### 5 大品类横向研究
+shortdrama 推流（爽点放大）/ movie summary（信息压缩 24:1）/ anime 情绪（情绪共振 1:1）/ tv 追更 / 综艺切片——MVP 聚焦前 3 种。
+
+### 工时与交付节奏
+- M2a-修正 ≈ 2.8d（Day 0-3）
+- M2b-light 2d（Day 4-5）
+- M2b-full 0d 或 4d（数据驱动决定）
+- 每 Day 1 commit，便于 review
+
+### Commit
+- 0 src/ 改动；纯设计决策
+- worktree-save 三件套同步（rule 250：排除其他 untracked 文件）
+- HEAD 仍为 e883433 不变
+
+### 决策依据
+- **为什么 M2b kickoff 暂停**：M2b 整套设计建立在"narrative_ir.text 是合格二创文本"前提上，前提崩则设计要重审
+- **为什么 schema bump 提前**（违反 commit 416bf55）：416bf55 决议假设单预设无切换需求；Q3 多预设后前提失效；提前一次搞定 5 字段（style_preset + binder_version + genre_inference + tone_recommendation + narrative_intent）反而更经济
+- **为什么 Q8 从 D 升级到 E**：用户"风格根据内容来"反馈让我意识到 D 内部判断不可审计；E 显式落字段到 timeline.json，与 Q1 可观测性方法论一致
+
+### 元教训
+1. **P0 反馈下纪律不能松**：第一反应想直接动 prompt，但 brainstorming 8 题逐个收敛后发现涉及 schema bump / 两阶段 LLM / M2b 拆分 / 5 天节奏 4 个连锁变更
+2. **横向研究的价值**：用户"风格不够，电视剧动漫怎么讲解"是关键转折点，让我跳出"电影解说一种品类"的框架
+3. **用户校正机制**：Q7 推荐 E 用户回 D + 补充诉求；Q8 推荐 D 用户问"D/E 区别"——两次校正显示 brainstorming 是迭代而非单向输出
+
+### Modified Files (本会话)
+- `.context/changes.md`：Session 20 完整记录
+- `.context/chat.md`：本条目
+- `.context/state.json`：phase 更新到 "M2a 二创风格修正 brainstorming COMPLETE"
+
+### No Code Changes
+本会话纯 brainstorming，零 src/ 改动。next_task 切换到 day0_design_spec（写 M2a 二创风格修正设计规约）。
+
+### 下一步
+按 todo list 执行 Day 0：写 docs/plans/tasks/M2a-scripting-main.md §M2a.7 + design.md §17.1/§17.4 修订 + M2b-scripting-robust.md 拆分。
+
+---
+
+## Session 21 — M2a-fix 里程碑 doc-only 落盘（2026-05-05 续）
+
+### 触发
+Session 20 完成 brainstorming Q1-Q8 + 8 角度 19 项 P0 修正共识后，用户明确指令"更新新方案计划，插入到 m2a/m2b 之间"，要求把决议落到 plan 文档体系。
+
+### 执行步骤（5 步）
+1. **Step 1 plan.md 主控修订**：进度总览插入 M2a-fix 行（W2↔W3 衔接，5 任务，6.7d）+ 路线图图示更新 + 关键路径更新 + 变更日志 v0.7 条目；总任务数 33→38，总工期 31.8d→38.5d（+6.7d）
+2. **Step 2 新建 M2a-fix-narrative-style.md**（372 行）：Brainstorming 决策矩阵（Q1-Q8）+ 19 项 P0 修正表 + 5 个任务块（M2a-fix.1 到 M2a-fix.5）；按 P0 修正分布：M2a-fix.1=数据契约/UX、M2a-fix.2=两阶段 LLM/schema bump、M2a-fix.3=扩展品类、M2a-fix.4=CLI/缓存/性能、M2a-fix.5=M2b-light + batch judge
+3. **Step 3 M2b-scripting-robust.md 头部修订**（+27 行 v0.7 提示）：标注 M2b-light 已并入 M2a-fix.5、M2b-full 条件启动、5 任务定义保留作技术参考
+4. **Step 4 .context 三件套更新**：plan.md 索引加 M2a-fix 行；state.json 升级到 0.10.0-executing，next_task → M2a-fix.1，新增 plan_subdocs.M2a-fix 元数据
+5. **Step 5 验证一致性**：grep M2a-fix 86 处分布合理（plan.md 8 / M2a-fix-doc 50 / M2b 5 / .context 23）；JSON 合法；git status 6 M + 1 ?? 新建 doc，无错别字 M2a.7
+
+### Commit
+- 0 src/ 改动；纯 doc-only 落盘
+- worktree-save：本次提交 .context 三件套 + docs/plans/* 共 6 文件，新建 docs/plans/tasks/M2a-fix-narrative-style.md
+- HEAD 仍为 e883433 不变
+
+### 决策依据
+- **为什么独立里程碑而非 M2a.7**：M2a-fix 本质是新增 1 个里程碑（含 schema bump/两阶段 LLM/M2b-light 跨阶段动作），不是 M2a 子任务 → 独立里程碑命名更准确
+- **为什么 19 项 P0 全部接受**：8/8 sign-off，无角色否决；分级落到 5 个 day 的具体任务里而非堆在 day 0
+- **为什么 M2b-light 并入 M2a-fix.5 而非 M2b**：M2b-light（batch judge + KPI 判定）是 M2a-fix 验收门禁的一部分，与 M2a-fix.4 CLI 强耦合；M2b-full（高级绑定 + BM25）保留在 M2b 视数据决定
+
+### Modified Files
+- `docs/plans/2026-05-04-autoclip-plan.md`：主控更新（+/- 23 行）
+- `docs/plans/tasks/M2a-fix-narrative-style.md`：新建 372 行
+- `docs/plans/tasks/M2b-scripting-robust.md`：头部 v0.7 提示（+27 行）
+- `.context/state.json`：版本 0.10.0-executing + next_task 切到 M2a-fix.1
+- `.context/plan.md`：索引加 M2a-fix 行
+- `.context/changes.md`：Session 20 + 21 完整记录
+- `.context/chat.md`：本条目
+
+### 元教训
+1. **"插入到 m2a/m2b 之间"是命名学问题**：用户用"M2a-fix"显式标注修正性质而非 M2a.7（暗示 M2a 子任务），命名直接反映里程碑独立性
+2. **doc-only 也要走完整 5 步验证**：grep 错别字 + JSON 合法性 + git status 一致性是 worktree-save 的 fail-safe，避免下次会话拿到不一致状态
+
+### 下一步
+进入 Day 0 = M2a-fix.1（设计规约 + 数据契约 + KPI 测量框架，1.1d）的实施阶段。
