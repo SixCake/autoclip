@@ -2,7 +2,7 @@
   "project": "autoclip",
   "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M2a.2-implementation-COMPLETE (Plot Outline prompt + parser + 9 unit tests passed; next: M2a.3 Narrative IR data model)",
+  "phase": "M2a.3-implementation-COMPLETE (Narrative IR data model + plot_summary style prompt + 7 unit tests passed; next: M2a.4 JSON repair + retry)",
   "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
@@ -350,7 +350,8 @@
       "files": 3,
       "lines": 126,
       "note": "expanded scope to dependencies (Shot.__post_init__ / _postprocess_segments) found 2 should-fix; +2 positive/negative reverse-assertion test pairs"
-    }
+    },
+    "19bebfd ✨feat : M2a.3 implementation — Narrative IR data model + plot_summary style prompt + 7 unit tests (7/7 passed) \t- algo/narrative_ir.py: added NarrativeSentence/NarrativeParagraph/NarrativeIR dataclasses with iter_sentences()/total_sentences() \t- prompts/narrative_ir.py: build_narrative_ir_messages() with role-aware constraints + parse_narrative_ir_response() JSON parser \t- prompts/style_presets/plot_summary.py: STYLE_NAME/STYLE_DESCRIPTION/FEW_SHOT_EXAMPLE exports for third-person objective narration \t- tests/unit/test_narrative_ir_parse.py: 7 test cases covering valid IR/schema error/iter_sentences flattening"
   ],
   "test_status": {
     "total_tests": 187,
@@ -474,5 +475,5 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-04T23:30:00+08:00"
+  "updated_at": "2026-05-05T11:09:12.064843+08:00"
 }

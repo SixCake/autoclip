@@ -38,6 +38,62 @@ User asked 3 times during batch-1 execution "请检查当前编辑的文件里�
 M2a.1 implementation phase: install LangChain dependencies + write factory.py + callback.py + unit tests + dual-provider smoke test. Estimated 1.0d.
 
 ---
+## 2026-05-05 (Session 14: M2a.3 Narrative IR implementation)
+
+### Trigger
+User input "继续" after M2a.2 completion, entering M2a.3 coding phase.
+
+### Implementation
+1. **m2a3-1**: Extended `src/autoclip/algo/narrative_ir.py` (+59 lines)
+   - Added `NarrativeSentence(sentence_idx/text/evidence_keywords)` dataclass
+   - Added `NarrativeParagraph(paragraph_idx/topic/approx_source_start_sec/approx_source_end_sec/sentences)` dataclass with time window validation
+   - Added `NarrativeIR(paragraphs)` dataclass with `iter_sentences()` flattening + `total_sentences()` count + `to_dict()` serialization
+2. **m2a3-2**: Created `src/autoclip/prompts/narrative_ir.py` (159 lines)
+   - `build_narrative_ir_messages(plot_outline_dict, asr_with_timestamps, target_duration_sec)`: SystemMessage injects STYLE_DESCRIPTION + sentence count constraint (N=target_duration/6 ±5) + role-aware constraints; HumanMessage injects plot_outline JSON + truncated ASR (40k chars) + few-shot example
+   - `parse_narrative_ir_response(raw)`: JSON parser returning NarrativeIR instance; raises ValueError on invalid JSON, KeyError on malformed schema
+3. **m2a3-3**: Created `src/autoclip/prompts/style_presets/{__init__,plot_summary}.py` (40 lines)
+   - Exports `STYLE_NAME="plot_summary"`, `STYLE_DESCRIPTION` (third-person objective narration, 8-15 chars/sentence, no exclamations/rhetorical questions), `FEW_SHOT_EXAMPLE` (role称呼示范)
+4. **m2a3-4**: Created `tests/unit/test_narrative_ir_parse.py` (196 lines, 7 test cases)
+   - TestParseNarrativeIRValid: valid IR parsing from LLM JSON response
+   - TestParseNarrativeIRError: invalid JSON / missing paragraphs field / malformed sentence data
+   - TestNarrativeIRMethods: iter_sentences() flattening / total_sentences() count / empty IR edge case
+   - All 7 tests passed in 0.08s
+
+### Commit
+- `✨feat : M2a.3 implementation — Narrative IR data model + plot_summary style prompt + 7 unit tests (7/7 passed)`
+- Changes: algo/narrative_ir.py (+59) + prompts/narrative_ir.py (159 new) + prompts/style_presets/__init__.py (9 new) + prompts/style_presets/plot_summary.py (40 new) + tests/unit/test_narrative_ir_parse.py (196 new)
+- pytest: 203+7=210 passed + 6 skipped (last green at f71d174 was 203 passed)
+
+### Next
+M2a.4 JSON repair + retry mechanism (预计 0.5d): implement robust JSON parsing with markdown fence stripping + Pydantic validation + graceful degradation on schema mismatch.
+## 2026-05-05 (Session 14: M2a.3 Narrative IR implementation)
+
+### Trigger
+User input "继续" after M2a.2 completion, entering M2a.3 coding phase.
+
+### Implementation
+1. **m2a3-1**: Extended `src/autoclip/algo/narrative_ir.py` (+59 lines)
+   - Added `NarrativeSentence(sentence_idx/text/evidence_keywords)` dataclass
+   - Added `NarrativeParagraph(paragraph_idx/topic/approx_source_start_sec/approx_source_end_sec/sentences)` dataclass with time window validation
+   - Added `NarrativeIR(paragraphs)` dataclass with `iter_sentences()` flattening + `total_sentences()` count + `to_dict()` serialization
+2. **m2a3-2**: Created `src/autoclip/prompts/narrative_ir.py` (159 lines)
+   - `build_narrative_ir_messages(plot_outline_dict, asr_with_timestamps, target_duration_sec)`: SystemMessage injects STYLE_DESCRIPTION + sentence count constraint (N=target_duration/6 ±5) + role-aware constraints; HumanMessage injects plot_outline JSON + truncated ASR (40k chars) + few-shot example
+   - `parse_narrative_ir_response(raw)`: JSON parser returning NarrativeIR instance; raises ValueError on invalid JSON, KeyError on malformed schema
+3. **m2a3-3**: Created `src/autoclip/prompts/style_presets/{__init__,plot_summary}.py` (40 lines)
+   - Exports `STYLE_NAME="plot_summary"`, `STYLE_DESCRIPTION` (third-person objective narration, 8-15 chars/sentence, no exclamations/rhetorical questions), `FEW_SHOT_EXAMPLE` (role称呼示范)
+4. **m2a3-4**: Created `tests/unit/test_narrative_ir_parse.py` (196 lines, 7 test cases)
+   - TestParseNarrativeIRValid: valid IR parsing from LLM JSON response
+   - TestParseNarrativeIRError: invalid JSON / missing paragraphs field / malformed sentence data
+   - TestNarrativeIRMethods: iter_sentences() flattening / total_sentences() count / empty IR edge case
+   - All 7 tests passed in 0.08s
+
+### Commit
+- `✨feat : M2a.3 implementation — Narrative IR data model + plot_summary style prompt + 7 unit tests (7/7 passed)`
+- Changes: algo/narrative_ir.py (+59) + prompts/narrative_ir.py (159 new) + prompts/style_presets/__init__.py (9 new) + prompts/style_presets/plot_summary.py (40 new) + tests/unit/test_narrative_ir_parse.py (196 new)
+- pytest: 203+7=210 passed + 6 skipped (last green at f71d174 was 203 passed)
+
+### Next
+M2a.4 JSON repair + retry mechanism (预计 0.5d): implement robust JSON parsing with markdown fence stripping + Pydantic validation + graceful degradation on schema mismatch.
 
 ## 2026-05-04 (Session 1: Brainstorming + Design v0.1)
 

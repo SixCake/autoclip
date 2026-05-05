@@ -720,3 +720,38 @@ M2a.2 Plot Outline prompt 实现 (预计 1d): 创建 prompts/plot_outline.py + C
 
 ### 下一步
 M2a.3 Narrative IR data model + plot_summary style prompt (预计 1d): 定义 NarrativeSentence/NarrativeParagraph/NarrativeIR 三层结构 + plot_summary f-string prompt + style_presets/plot_summary.py few-shot example.
+
+
+---
+
+## Session 14 (2026-05-05) — M2a.3 Narrative IR implementation complete (NarrativeSentence/NarrativeParagraph/NarrativeIR + plot_summary style prompt + 7 unit tests passed)
+
+### 触发
+用户输入 "继续"，进入 M2a.3 编码阶段。
+
+### 实施过程
+1. **m2a3-1**: 扩展 `src/autoclip/algo/narrative_ir.py` (+59 行)
+   - 新增 `NarrativeSentence(sentence_idx/text/evidence_keywords)` dataclass
+   - 新增 `NarrativeParagraph(paragraph_idx/topic/approx_source_start_sec/approx_source_end_sec/sentences)` dataclass，含时间窗口合法性校验
+   - 新增 `NarrativeIR(paragraphs)` dataclass，提供 `iter_sentences()` 扁平化 + `total_sentences()` 计数 + `to_dict()` 序列化
+2. **m2a3-2**: 创建 `src/autoclip/prompts/narrative_ir.py` (159 行)
+   - `build_narrative_ir_messages(plot_outline_dict, asr_with_timestamps, target_duration_sec)`: SystemMessage 注入 STYLE_DESCRIPTION + 总句数约束 (N=target_duration/6 ±5) + 角色使用规约；HumanMessage 注入 plot_outline JSON + 截断 ASR (40k chars) + few-shot example
+   - `parse_narrative_ir_response(raw)`: JSON 解析器返回 NarrativeIR 实例；非法 JSON 抛 ValueError，schema 不匹配抛 KeyError
+3. **m2a3-3**: 创建 `src/autoclip/prompts/style_presets/{__init__,plot_summary}.py` (40 行)
+   - 导出 `STYLE_NAME="plot_summary"`、`STYLE_DESCRIPTION` (第三人称客观叙述，单句 8-15 字，不用感叹号/反问句)、`FEW_SHOT_EXAMPLE` (角色称呼示范)
+4. **m2a3-4**: 创建 `tests/unit/test_narrative_ir_parse.py` (196 行，7 用例)
+   - TestParseNarrativeIRValid: 合法 IR 解析
+   - TestParseNarrativeIRError: 非法 JSON / 缺失 paragraphs 字段 / malformed sentence 数据
+   - TestNarrativeIRMethods: iter_sentences() 扁平化 / total_sentences() 计数 / 空 IR 边界情况
+   - 全部 7 用例通过 in 0.08s
+
+### Commit
+- `✨feat : M2a.3 implementation — Narrative IR data model + plot_summary style prompt + 7 unit tests (7/7 passed)`
+- 改动: algo/narrative_ir.py (+59) + prompts/narrative_ir.py (159 new) + prompts/style_presets/__init__.py (9 new) + prompts/style_presets/plot_summary.py (40 new) + tests/unit/test_narrative_ir_parse.py (196 new)
+- pytest: 203+7=210 passed + 6 skipped (last green at f71d174 was 203 passed)
+
+### 下一步
+M2a.4 JSON repair + retry mechanism (预计 0.5d): 实现鲁棒 JSON 解析，支持 markdown fence 剥离 + Pydantic 校验 + schema 不匹配时的优雅降级。
+
+### 元教训
+**NarrativeIR 时间窗口设计**: LLM 不直接输出绝对时间区间，改输出段落级粗时间窗口 (`approx_source_start_sec` / `approx_source_end_sec`) + 句级 `evidence_keywords`，由 M2b time_resolver 反向校验。这种设计解耦了 Scripting (生成解说稿) 和 Assembly (镜头绑定) 两个阶段的职责，避免 LLM 在单次调用中同时处理叙事生成和时间对齐的双重复杂度。
