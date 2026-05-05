@@ -102,7 +102,7 @@ def clear_stage_handlers() -> None:
 _STAGE_MODULES: tuple[str, ...] = (
     "autoclip.pipeline.ingest",  # M1.6 — dual-track normalize + audio extract
     "autoclip.pipeline.index",   # M1.8 — shot detection + ASR + audio.wav cleanup (K9)
-    # "autoclip.pipeline.scripting",
+    "autoclip.pipeline.scripting",  # M2a.6 — plot_outline + narrative_ir LLM + greedy binding → timeline.json
     # "autoclip.pipeline.assembly",
     # "autoclip.pipeline.render",
 )
