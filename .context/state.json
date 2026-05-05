@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.11.5-v0.8.7-batch-eval",
+  "version": "0.11.6-v0.8.8-complete",
   "stage": "executing",
-  "phase": "v0.8 实施 — B 阶段验收中（v0.8.1+v0.8.3+v0.8.4+v0.8.5+v0.8.6+v0.8.7 ✅，下一步 v0.8.8 验收报告）",
-  "current_focus": "v0.8.8 验收报告 + 决定是否启 M2b-full（0.6d）",
+  "phase": "v0.8 实施 — B 阶段完成（v0.8.1+v0.8.3+v0.8.4+v0.8.5+v0.8.6+v0.8.7+v0.8.8 ✅，不启 M2b-full，下一步 M3）",
+  "current_focus": "M3 — Render + Web + 合规（9 个任务，4d）",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
   "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
@@ -610,6 +610,6 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-06T18:56:00.000000+08:00",
-  "last_session": "Session 29 — v0.8.7 batch eval: 5-material run (OK 2 / FAIL 2 / SKIP 1), score script v087_score.py, batch runners, eval report 210-line, corrected ASR skip attribution"
+  "updated_at": "2026-05-06T19:13:00.000000+08:00",
+  "last_session": "Session 30 — v0.8.8: D1/D5 score calibration (03=98/04=98 PASS), non-narrative plot_outline fallback (degraded=True), shared-ASR batch runner (cold-start eliminated); 374 passed 0 fail"
 }

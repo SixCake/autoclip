@@ -2307,3 +2307,53 @@ v0.8.7 验收门：5 部题材（儿歌/动漫/电影解说/短剧/Vlog）跑批
 - data/realvideo_test/v087_batch/ 已在 .gitignore 忽略，不入 git
 - scripts/ 4 个文件纳入 git commit（业务文件）
 - .context/ 单独管理，不入 rule 250 commit
+
+---
+
+## 2026-05-06 (Session 30: v0.8.8 — D1/D5 校准 + 非叙事 fallback + 共享 ASR 批跑)
+
+### Trigger
+v0.8.8 backlog 处理：P0 评分维度校准 + P1 非叙事题材 fallback + P2 ASR 冷启动消除（直接进入，不启 M2b-full）
+
+### Changes
+
+**scripts/v087_score.py** (修改, v0.8.8 校准版):
+- D1: 从"segments[0].source_start_sec ≤ 3s"改为"hook_candidates ≥3 个 score≥0.7 白名单钩子"
+  原因：60s 截取与 hook 拼到首段是 ASSEMBLY 职责，v0.8.7 跳过 ASSEMBLY 时 D1 判据不适用
+- D5: 去掉时长偏离扣分，仅看"段数≥5 + 无空字段"（时长裁剪是 ASSEMBLY 职责）
+- 校准结果：03=98 PASS / 04=98 PASS（原 88/73，04 的 73 是评分维度不匹配导致的误判）
+
+**src/autoclip/pipeline/scripting.py** (修改, P1 非叙事题材 fallback):
+- 顶部 import 加 Character, KeyAct
+- PlotOutlineError 文档注释更新说明 v0.8.8 fallback 行为
+- run_scripting() Step 2 改为 try/except: 捕获 PlotOutlineError → 降级 PlotOutline
+  (1 虚拟 act 覆盖全片，genre=非叙事，plot_outline_degraded=True)
+- timeline_payload 加 plot_outline_degraded 字段
+- 降级后 persona_inferer + narrative_ir + hook_generator 仍正常运行，pipeline 继续产出 timeline
+
+**tests/unit/test_scripting_handler_progress.py** (修改, 测试适配):
+- test_plot_outline_unrepairable_raises_PlotOutlineError → test_plot_outline_unrepairable_degrades_to_fallback
+  验证新行为：garbage plot_outline → fallback → timeline.json 写入 + plot_outline_degraded=True
+
+**tests/integration/test_scripting_e2e.py** (修改, 测试适配):
+- top-level keys 断言加 plot_outline_degraded
+- assert timeline["plot_outline_degraded"] is False（happy path）
+
+**scripts/run_batch_shared_asr.py** (新建, P2 ASR 冷启动消除):
+- 批跑入口脚本：在单一 Python 进程内串行处理多部视频
+- INDEX 阶段在父进程直接调用 run_index()（共享 _MODEL_SINGLETON）
+- INGEST/SCRIPT 阶段仍走 mp.Process（fault isolation）
+- 效果：large-v3 模型加载 ~8min 冷启动只付一次（而非每部视频付一次）
+
+### Verification
+- poetry run pytest tests/ -q → 374 passed, 9 skipped ✅（无回归）
+- 评分校准：03=98 PASS / 04=98 PASS（校准后正确反映 SCRIPTING 阶段真实能力）
+- fallback 测试：test_plot_outline_unrepairable_degrades_to_fallback 通过 ✅
+- ASR 共享脚本：语法验证通过 ✅
+
+### v0.8.8 backlog 结论
+- M2b-full (0.6d): 不启 — 叙事性视频 2/2 质量足够，原"两阶段拆分"问题已被 v0.8 prompt-only 解决
+- v0.8.8 P0 (0.1d): ✅ 评分维度校准完成
+- v0.8.8 P1 (0.3d): ✅ 非叙事题材 fallback 完成
+- v0.8.8 P2 (0.3d): ✅ ASR 冷启动消除方案实现（共享批跑脚本）
+- 下一步: M3 (Render + Web + 合规)

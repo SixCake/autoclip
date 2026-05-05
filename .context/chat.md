@@ -1569,3 +1569,29 @@ v0.8.7 B 阶段验收门：5 部题材跑批 + 人工评分 + 报告输出。
 
 ### 下一步
 - v0.8.8 验收报告 + 决定是否启 M2b-full (0.6d)
+
+---
+
+## Session 30 — v0.8.8 backlog P0/P1/P2（2026-05-06）
+
+### Trigger
+v0.8.7 跑批报告输出后，直接进入 v0.8.8 backlog（不启 M2b-full）。
+
+### 关键决策
+- **不启 M2b-full**：叙事性视频 2/2 质量足够，原"两阶段拆分"问题已被 v0.8 prompt-only 解决
+- **P0 评分校准**：D1/D5 依据改为 SCRIPTING 阶段真实产物，03/04 均达 98/100 PASS
+
+### 交付产物
+| 任务 | 产物 | 结果 |
+|---|---|---|
+| P0 评分维度 D1/D5 校准 | `scripts/v087_score.py` 更新 | 03=98 PASS / 04=98 PASS |
+| P1 非叙事题材 fallback | `src/autoclip/pipeline/scripting.py` + 2 测试文件 | plot_outline_degraded=True，pipeline 继续产出 timeline |
+| P2 ASR 冷启动消除 | `scripts/run_batch_shared_asr.py` (新建) | INDEX in-process 共享 _MODEL_SINGLETON，~8min 冷启动只付一次 |
+
+### 测试验证
+- 374 passed, 9 skipped ✅（无回归）
+- K8 测试：test_plot_outline_unrepairable_degrades_to_fallback 通过 ✅
+- timeline schema：plot_outline_degraded=False（happy path）验证 ✅
+
+### 下一步
+- M3 (Render + Web + 合规) — 9 个任务
