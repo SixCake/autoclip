@@ -651,3 +651,42 @@ M2a.1 实现阶段：安装 LangChain 依赖 + 编写 factory.py + callback.py +
 2. **批次 2**: 创建 `providers/llm/{__init__,factory,callback}.py` + 9 个单元测试（TDD fail-first → 实现 → pass）
 3. **批次 3**: 双 provider 冒烟集成测试（需用户提供 `DEEPSEEK_API_KEY` + `DASHSCOPE_API_KEY`）
 4. **批次 4**: git commit + worktree-save 结束门禁
+
+
+---
+
+## Session 12 (2026-05-05) — M2a.1 实现阶段完成 (LangChain + DeepSeek + LlmCallsRecorder)
+
+### 触发
+用户输入 "现在开始实现"，进入 M2a.1 编码阶段。先发现 plan doc drift (commit 0e45501 message vs actual diff)，执行 adhoc v0.5-corr 修复 (commit 8b0008b)，然后开始 M2a.1 实现。
+
+### impl-1: 依赖安装
+`poetry add langchain-core>=0.3,<0.4 langchain-openai>=0.2,<0.3 langchain-community>=0.3,<0.4 dashscope^1.20`
+- 新增 22 个包，降级 packaging 26.2→25.0
+- 锁版本符合 D1=B + D2=A 决策
+
+### impl-2: TDD 实现 (9 单元测试全部通过)
+- 创建 `providers/llm/{__init__,factory,callback}.py`
+- 创建 `tests/unit/test_llm_factory.py` (5 用例) + `test_llm_callback.py` (4 用例)
+- 第一轮测试 7 passed / 2 failed (ChatOpenAI.base_url → openai_api_base, ChatTongyi.model → model_name)
+- 修复断言后 9/9 passed in 0.63s
+
+**关键实现细节**:
+- `get_llm()`: DeepSeek 主 via `ChatOpenAI(base_url="https://api.deepseek.com/v1")`, dashscope 兜底 via `ChatTongyi(model="qwen-plus")`; 缺 api_key 抛 RuntimeError; json_mode 注入 response_format
+- `LlmCallsRecorder`: BaseCallbackHandler 继承，on_chat_model_start 捕获请求，on_llm_end 提取 usage_metadata 并落盘 `{job_dir}/llm_calls/{stage}_{seq:03d}.json`; mkdir 自动创建; 写盘失败仅 loguru.warning 不抛异常
+
+### impl-3: 冒烟集成测试
+- 创建 `tests/integration/test_dual_provider_smoke.py` (2 用例: deepseek_smoke + dashscope_smoke)
+- 默认 skip (需 RUN_INTEGRATION=1 + DEEPSEEK_API_KEY + DASHSCOPE_API_KEY)
+- 用户未提供 API key，跳过实跑验证
+
+### Commit
+- `✨feat : M2a.1 implementation — LangChain factory + callback + 9 unit tests (9/9 passed)`
+- 改动: providers/llm/{__init__,factory,callback}.py (3 new files) + tests/unit/test_llm_factory.py + test_llm_callback.py (2 new) + tests/integration/test_dual_provider_smoke.py (1 new) + pyproject.toml (deps added) + poetry.lock (auto-generated)
+- pytest: 185+9=194 passed + 6 skipped (last green at 8b0008b was 185 passed)
+
+### 下一步
+M2a.2 Plot Outline prompt 实现 (预计 1d): 创建 prompts/plot_outline.py + Character/KeyAct/PlotOutline dataclass + Pydantic 校验层 + 解析器支持 markdown fence + 角色推断指令。
+
+### 元教训
+**LangChain 属性名陷阱**: ChatOpenAI 的 base_url 实际存储在 openai_api_base 属性，ChatTongyi 的 model 存储在 model_name。写测试前必须先用 `dir()` 或官方文档确认属性名，不能凭直觉猜。

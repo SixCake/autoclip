@@ -954,3 +954,32 @@ User in pre-M1.5 phase:
 
 ### 元教训
 **commit message ≠ actual diff**: 之前我把 "file_replace 调用成功" 当作 "落盘成功" 的等价信号，但批次 1 时如果有任何一个 file_replace 静默失败（返回 success 但实际不匹配），commit message 仍会列出全部声称改动，造成历史记录与文件状态脱节。**修复方向**：批次 2 验证阶段必须 grep 每一处声称的改动是否在文件中实际出现，而不是只看 file_replace 工具返回值。
+
+
+---
+
+## 2026-05-05 — Session 12: M2a.1 实现阶段完成 (LangChain + DeepSeek + LlmCallsRecorder)
+
+### 触发
+用户输入 "现在开始实现"，进入 M2a.1 编码。先执行 adhoc v0.5-corr 修复 (commit 8b0008b)，然后开始实现。
+
+### 实施过程
+1. **impl-1 依赖安装**: poetry add langchain-core/openai/community + dashscope (22 新包，D1=B/D2=A 显式锁版本)
+2. **impl-2 TDD 实现**: 
+   - 创建 providers/llm/{__init__,factory,callback}.py (3 文件)
+   - 创建 tests/unit/test_llm_factory.py (5 用例) + test_llm_callback.py (4 用例)
+   - 首轮 7 passed / 2 failed (属性名 mismatch: base_url→openai_api_base, model→model_name)
+   - 修复后 9/9 passed in 0.63s
+3. **impl-3 冒烟测试**: 创建 tests/integration/test_dual_provider_smoke.py (2 用例，默认 skip，需用户提供 API key)
+
+### 关键产出
+- `get_llm()`: DeepSeek 主 (ChatOpenAI base_url=https://api.deepseek.com/v1) + dashscope 兜底 (ChatTongyi qwen-plus); 缺 api_key 抛 RuntimeError; json_mode 注入 response_format
+- `LlmCallsRecorder`: BaseCallbackHandler 实现，落盘 {job_dir}/llm_calls/{stage}_{seq:03d}.json schema (seq/stage/model/messages/response/usage/started_at/ended_at/duration_sec); mkdir 自动创建; 写盘失败仅 warning 不抛
+- 单元测试 9/9 覆盖: factory 5 (default provider/json_mode/missing key/callbacks) + callback 4 (write file/seq increment/mkdir/disk failure)
+
+### Commit
+- `✨feat : M2a.1 implementation — LangChain factory + callback + 9 unit tests (9/9 passed)`
+- pytest: 194 passed + 6 skipped (185 原有 + 9 新增)
+
+### 下一步
+M2a.2 Plot Outline prompt 实现。

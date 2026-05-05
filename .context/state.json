@@ -2,7 +2,8 @@
   "project": "autoclip",
   "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M2a-brainstorming-v0.5-COMPLETE (decision matrix converged + batch-1 doc landing at commit 0e45501; next: M2a.1 implementation — LangChain deps + factory.py + callback.py + unit tests + dual-provider smoke test)",  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
+  "phase": "M2a.1-implementation-COMPLETE (LangChain factory + callback + 9 unit tests passed; next: M2a.2 Plot Outline prompt)",
+  "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,
   "design_doc_version": "v0.4 (Part IV §21-§23 latest)",
@@ -17,14 +18,49 @@
       "tasks_completed": 8,
       "estimate_days": 6.8,
       "status": "complete",
-      "completed_tasks": ["M1.1", "M1.2", "M1.3", "M1.4", "M1.5", "M1.6", "M1.7", "M1.8"],
+      "completed_tasks": [
+        "M1.1",
+        "M1.2",
+        "M1.3",
+        "M1.4",
+        "M1.5",
+        "M1.6",
+        "M1.7",
+        "M1.8"
+      ],
       "next_tasks": [],
-      "remaining_acceptance": ["M1 e2e: curl POST /api/jobs 5min clip → ingest+index DONE in <2min, shots.json + asr.json present, audio.wav absent"]
+      "remaining_acceptance": [
+        "M1 e2e: curl POST /api/jobs 5min clip → ingest+index DONE in <2min, shots.json + asr.json present, audio.wav absent"
+      ]
     },
-    "M2a": {"path": "docs/plans/tasks/M2a-scripting-main.md", "lines": 304, "tasks": 6, "estimate_days": 5.5, "status": "pending"},
-    "M2b": {"path": "docs/plans/tasks/M2b-scripting-robust.md", "lines": 282, "tasks": 5, "estimate_days": 6.0, "status": "pending"},
-    "M3": {"path": "docs/plans/tasks/M3-render-web-compliance.md", "lines": 466, "tasks": 9, "estimate_days": 10.25, "status": "pending"},
-    "M4": {"path": "docs/plans/tasks/M4-e2e-validation.md", "lines": 320, "tasks": 5, "estimate_days": 5.5, "status": "pending"}
+    "M2a": {
+      "path": "docs/plans/tasks/M2a-scripting-main.md",
+      "lines": 304,
+      "tasks": 6,
+      "estimate_days": 5.5,
+      "status": "pending"
+    },
+    "M2b": {
+      "path": "docs/plans/tasks/M2b-scripting-robust.md",
+      "lines": 282,
+      "tasks": 5,
+      "estimate_days": 6.0,
+      "status": "pending"
+    },
+    "M3": {
+      "path": "docs/plans/tasks/M3-render-web-compliance.md",
+      "lines": 466,
+      "tasks": 9,
+      "estimate_days": 10.25,
+      "status": "pending"
+    },
+    "M4": {
+      "path": "docs/plans/tasks/M4-e2e-validation.md",
+      "lines": 320,
+      "tasks": 5,
+      "estimate_days": 5.5,
+      "status": "pending"
+    }
   },
   "total_tasks": 33,
   "tasks_completed_overall": 8,
@@ -44,8 +80,14 @@
       "7. assert <data_dir>/<job_id>/audio.wav does NOT exist (K9 verification)"
     ],
     "estimate_days": 0.2,
-    "blocks": ["M2a kickoff (Scripting main flow needs verified shots.json + asr.json contracts)"],
-    "system_deps": ["ffmpeg/ffprobe", "scenedetect", "faster-whisper weights (~1.5GB medium / 3GB large-v3)"]
+    "blocks": [
+      "M2a kickoff (Scripting main flow needs verified shots.json + asr.json contracts)"
+    ],
+    "system_deps": [
+      "ffmpeg/ffprobe",
+      "scenedetect",
+      "faster-whisper weights (~1.5GB medium / 3GB large-v3)"
+    ]
   },
   "next_milestone": {
     "id": "M2a",
@@ -64,7 +106,17 @@
     "commit_head": "<post-round-10-commit>",
     "self_check_rounds": 10,
     "self_check_rounds_breakdown": "Rounds 1-6 are CODE-layer (fixed real bugs in src/tests, see chat.md L529-535 table). Rounds 7-10 are DESCRIPTION-layer (fixed numerical/attribution errors in .context state files themselves, accumulating from Round 6 worktree-save 5d24efd onwards). Round 10 is the FINAL sealing round per LIM#9 — no more self-check rounds will be opened on M1.8 unless user reports an actual functional bug",
-    "self_check_commits": ["fe38cbf (R2)", "ba03849 (R3)", "0b83337 (R4)", "08a664a (R5)", "1285acd (R6)", "fb84ed3 (R7 desc)", "6b3065a (R8 desc)", "e8738c2 (R9 desc)", "<R10 desc>"],
+    "self_check_commits": [
+      "fe38cbf (R2)",
+      "ba03849 (R3)",
+      "0b83337 (R4)",
+      "08a664a (R5)",
+      "1285acd (R6)",
+      "fb84ed3 (R7 desc)",
+      "6b3065a (R8 desc)",
+      "e8738c2 (R9 desc)",
+      "<R10 desc>"
+    ],
     "files_added": 3,
     "files_modified": 1,
     "lines_added": 847,
@@ -115,7 +167,10 @@
     },
     "whisper_singleton": {
       "module": "autoclip.providers.asr.local_whisper",
-      "globals": ["_MODEL_SINGLETON", "_LOADED_MODEL_SIZE"],
+      "globals": [
+        "_MODEL_SINGLETON",
+        "_LOADED_MODEL_SIZE"
+      ],
       "purpose": "单进程内复用 WhisperModel 实例; spawn 子进程会独立加载 (符合 multiprocessing 隔离语义)",
       "test_helper": "_reset_singleton_for_tests()",
       "introduced_by": "M1.5"
@@ -132,32 +187,170 @@
     "kpi_impact": "K9 由 OSS object cleanup 简化为本地 audio.wav cleanup, 实质更彻底 (音频从未离开本地)"
   },
   "git_log": [
-    {"sha": "f788ae5", "msg": "📝docs: initial design and plan documents (v0.4)", "files": 10, "lines": 4205},
-    {"sha": "2d5fcce", "msg": "✨feat: M1.1 project scaffold + Poetry deps + Settings + test baseline", "files": 11, "lines": 4570},
-    {"sha": "1c9bb0d", "msg": "✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests", "files": 8, "lines": 649},
-    {"sha": "5454bda", "msg": "✨feat: M1.3 file-based state machine for pipeline orchestration", "files": 3, "lines": 437},
-    {"sha": "4c49a44", "msg": "🚧 chore: gitignore coverage artifacts", "files": 1, "lines": 5},
-    {"sha": "71e5f07", "msg": "✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing", "files": 9, "lines": 1273},
-    {"sha": "bef6b60", "msg": "📝docs: v0.4 adhoc - localize ASR + LLM-based character inference", "files": 4, "lines": 313},
-    {"sha": "2747ef1", "msg": "🎨refactor: replace aliyun_asr settings with local whisper config (M1.5 prep)", "files": 4, "lines": 85},
-    {"sha": "444a3dc", "msg": "📝docs: initialize .context/ workspace tracking (v0.4.5 state)", "files": 5, "lines": 1126},
-    {"sha": "56cf8e4", "msg": "📝docs: v0.5 adhoc - M1.6 Ingest dual-track normalize (low+hd)", "files": 4, "lines": 117},
-    {"sha": "cb2c32f", "msg": "📝docs: sync .context for Session 6 (M1.6 v0.5 adhoc dual-track normalize)", "files": 2, "lines": 178},
-    {"sha": "433c8b4", "msg": "🚧chore: R15 instance triage - HuggingFace network reset, 3-tier mitigation", "files": 3, "lines": 229},
-    {"sha": "7d15cc5", "msg": "✨feat: M1.6 Ingest stage - dual-track normalize + audio extract (ADR-010)", "files": 7, "lines": 1289},
-    {"sha": "bb51b87", "msg": "📝docs: worktree-save - sync .context for Session 7 (M1.6 done, R15 mitigated)", "files": 4, "lines": 129},
-    {"sha": "e25f07a", "msg": "✨feat: M1.7 PySceneDetect shot detector (algo layer, 17 unit tests)", "files": 3, "lines": 482, "note": "amended into d307ffe — see below"},
-    {"sha": "d307ffe", "msg": "✨feat: M1.7 PySceneDetect shot detector (amended for post-review dead-code removal)", "files": 3, "lines": 473},
-    {"sha": "dd5f89a", "msg": "📝docs: worktree-save - sync .context for Session 8 (M1.7 done + post-review dead-code fix)", "files": 4, "lines": 135},
-    {"sha": "7a74d10", "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)", "files": 4, "lines": 847},
-    {"sha": "ed0e0ff", "msg": "📝docs: worktree-save - sync .context for Session 9 (M1.8 done, M1 milestone 8/8) — amended to fold 2x E501 fixes in test_index_handler.py", "files": 5, "lines": 148, "note": "amended from 936ce72 to fold 2 strict-ruff E501 fixes (test docstring + happy_path with-block)"},
-    {"sha": "faad1df", "msg": "🚧chore: sync state.json git_log[-1] to actual HEAD (post-amend correction)", "files": 1, "lines": 1},
-    {"sha": "936f217", "msg": "📝docs: worktree-save - record M1.8 post-implementation self-check + tech debt", "files": 1, "lines": 30, "note": "Round 1 self-check: keyword grep only, missed semantic bugs"},
-    {"sha": "fe38cbf", "msg": "🐛fix: M1.8 self-check round 2 — dead code, hidden assumptions, broken integration test", "files": 3, "lines": 110, "note": "5 must-fix: dead TYPE_CHECKING + shots empty crash hidden assumption + broken integration test rewritten to bytes+mtime strict reuse proof"},
-    {"sha": "ba03849", "msg": "🐛fix: M1.8 self-check round 3 — contract mismatches with state.py (RUNNING marker, fsync, OSError surfacing)", "files": 3, "lines": 165, "note": "3 contract bugs vs state.py; BUG#7 (RUNNING marker) was actually wrong, reverted in Round 4"},
-    {"sha": "0b83337", "msg": "🐛fix: M1.8 self-check round 4 — revert wrong BUG#7 fix from round 3 + harden OSError test", "files": 3, "lines": 71, "note": "self-introduced regression revert: read runner._stage_entrypoint, found it already marks RUNNING; reverse-assertion test guards against re-adding"},
-    {"sha": "08a664a", "msg": "🐛fix: M1.8 self-check round 5 — drop dead `_ = state` lines + document LIM#8 (runner.py Protocol docstring drift)", "files": 2, "lines": 23, "note": "dead code blind spot + new LIM#8 deferred to M2a tech debt cleanup"},
-    {"sha": "1285acd", "msg": "🐛fix: M1.8 self-check round 6 — clarify ValueError comment + WARN on empty ASR result + 2 new tests", "files": 3, "lines": 126, "note": "expanded scope to dependencies (Shot.__post_init__ / _postprocess_segments) found 2 should-fix; +2 positive/negative reverse-assertion test pairs"}
+    {
+      "sha": "f788ae5",
+      "msg": "📝docs: initial design and plan documents (v0.4)",
+      "files": 10,
+      "lines": 4205
+    },
+    {
+      "sha": "2d5fcce",
+      "msg": "✨feat: M1.1 project scaffold + Poetry deps + Settings + test baseline",
+      "files": 11,
+      "lines": 4570
+    },
+    {
+      "sha": "1c9bb0d",
+      "msg": "✨feat: M1.2 SQLAlchemy ORM models + DB engine + 7 tests",
+      "files": 8,
+      "lines": 649
+    },
+    {
+      "sha": "5454bda",
+      "msg": "✨feat: M1.3 file-based state machine for pipeline orchestration",
+      "files": 3,
+      "lines": 437
+    },
+    {
+      "sha": "4c49a44",
+      "msg": "🚧 chore: gitignore coverage artifacts",
+      "files": 1,
+      "lines": 5
+    },
+    {
+      "sha": "71e5f07",
+      "msg": "✨feat: M1.4 FastAPI app + PipelineRunner with multiprocessing",
+      "files": 9,
+      "lines": 1273
+    },
+    {
+      "sha": "bef6b60",
+      "msg": "📝docs: v0.4 adhoc - localize ASR + LLM-based character inference",
+      "files": 4,
+      "lines": 313
+    },
+    {
+      "sha": "2747ef1",
+      "msg": "🎨refactor: replace aliyun_asr settings with local whisper config (M1.5 prep)",
+      "files": 4,
+      "lines": 85
+    },
+    {
+      "sha": "444a3dc",
+      "msg": "📝docs: initialize .context/ workspace tracking (v0.4.5 state)",
+      "files": 5,
+      "lines": 1126
+    },
+    {
+      "sha": "56cf8e4",
+      "msg": "📝docs: v0.5 adhoc - M1.6 Ingest dual-track normalize (low+hd)",
+      "files": 4,
+      "lines": 117
+    },
+    {
+      "sha": "cb2c32f",
+      "msg": "📝docs: sync .context for Session 6 (M1.6 v0.5 adhoc dual-track normalize)",
+      "files": 2,
+      "lines": 178
+    },
+    {
+      "sha": "433c8b4",
+      "msg": "🚧chore: R15 instance triage - HuggingFace network reset, 3-tier mitigation",
+      "files": 3,
+      "lines": 229
+    },
+    {
+      "sha": "7d15cc5",
+      "msg": "✨feat: M1.6 Ingest stage - dual-track normalize + audio extract (ADR-010)",
+      "files": 7,
+      "lines": 1289
+    },
+    {
+      "sha": "bb51b87",
+      "msg": "📝docs: worktree-save - sync .context for Session 7 (M1.6 done, R15 mitigated)",
+      "files": 4,
+      "lines": 129
+    },
+    {
+      "sha": "e25f07a",
+      "msg": "✨feat: M1.7 PySceneDetect shot detector (algo layer, 17 unit tests)",
+      "files": 3,
+      "lines": 482,
+      "note": "amended into d307ffe — see below"
+    },
+    {
+      "sha": "d307ffe",
+      "msg": "✨feat: M1.7 PySceneDetect shot detector (amended for post-review dead-code removal)",
+      "files": 3,
+      "lines": 473
+    },
+    {
+      "sha": "dd5f89a",
+      "msg": "📝docs: worktree-save - sync .context for Session 8 (M1.7 done + post-review dead-code fix)",
+      "files": 4,
+      "lines": 135
+    },
+    {
+      "sha": "7a74d10",
+      "msg": "✨feat: M1.8 Index stage handler — shot detector + ASR + audio.wav cleanup (K9)",
+      "files": 4,
+      "lines": 847
+    },
+    {
+      "sha": "ed0e0ff",
+      "msg": "📝docs: worktree-save - sync .context for Session 9 (M1.8 done, M1 milestone 8/8) — amended to fold 2x E501 fixes in test_index_handler.py",
+      "files": 5,
+      "lines": 148,
+      "note": "amended from 936ce72 to fold 2 strict-ruff E501 fixes (test docstring + happy_path with-block)"
+    },
+    {
+      "sha": "faad1df",
+      "msg": "🚧chore: sync state.json git_log[-1] to actual HEAD (post-amend correction)",
+      "files": 1,
+      "lines": 1
+    },
+    {
+      "sha": "936f217",
+      "msg": "📝docs: worktree-save - record M1.8 post-implementation self-check + tech debt",
+      "files": 1,
+      "lines": 30,
+      "note": "Round 1 self-check: keyword grep only, missed semantic bugs"
+    },
+    {
+      "sha": "fe38cbf",
+      "msg": "🐛fix: M1.8 self-check round 2 — dead code, hidden assumptions, broken integration test",
+      "files": 3,
+      "lines": 110,
+      "note": "5 must-fix: dead TYPE_CHECKING + shots empty crash hidden assumption + broken integration test rewritten to bytes+mtime strict reuse proof"
+    },
+    {
+      "sha": "ba03849",
+      "msg": "🐛fix: M1.8 self-check round 3 — contract mismatches with state.py (RUNNING marker, fsync, OSError surfacing)",
+      "files": 3,
+      "lines": 165,
+      "note": "3 contract bugs vs state.py; BUG#7 (RUNNING marker) was actually wrong, reverted in Round 4"
+    },
+    {
+      "sha": "0b83337",
+      "msg": "🐛fix: M1.8 self-check round 4 — revert wrong BUG#7 fix from round 3 + harden OSError test",
+      "files": 3,
+      "lines": 71,
+      "note": "self-introduced regression revert: read runner._stage_entrypoint, found it already marks RUNNING; reverse-assertion test guards against re-adding"
+    },
+    {
+      "sha": "08a664a",
+      "msg": "🐛fix: M1.8 self-check round 5 — drop dead `_ = state` lines + document LIM#8 (runner.py Protocol docstring drift)",
+      "files": 2,
+      "lines": 23,
+      "note": "dead code blind spot + new LIM#8 deferred to M2a tech debt cleanup"
+    },
+    {
+      "sha": "1285acd",
+      "msg": "🐛fix: M1.8 self-check round 6 — clarify ValueError comment + WARN on empty ASR result + 2 new tests",
+      "files": 3,
+      "lines": 126,
+      "note": "expanded scope to dependencies (Shot.__post_init__ / _postprocess_segments) found 2 should-fix; +2 positive/negative reverse-assertion test pairs"
+    }
   ],
   "test_status": {
     "total_tests": 187,
@@ -190,18 +383,63 @@
       "_total_new": 33,
       "_self_check_additions": "Round 3 +2 (RUNNING marker + OSError propagate, then Round 4 renamed/inverted RUNNING test → does_not_redundantly_mark_running, kept OSError); Round 6 +2 (empty-ASR positive + nonempty-ASR negative reverse-assertion pair)"
     }
-  },  "kpi_tracking": {
-    "K1_binding_accuracy": {"target": ">=0.7", "verified_at": "M2b.5", "actual": null},
-    "K2_evidence_recall": {"target": ">=0.8", "verified_at": "M2b.5", "actual": null},
-    "K3_fallback_ratio": {"target": "<=0.3", "verified_at": "M2b.5", "actual": null},
-    "K4_user_score": {"target": ">=4/5", "verified_at": "M4.2", "actual": null},
-    "K5_manual_tune_time": {"target": "<=1h/film", "verified_at": "M4.5", "actual": null},
-    "K6_e2e_duration": {"target": "<=16min/90min", "verified_at": "M4.5", "actual": null},
-    "K7_resume": {"target": "subprocess kill recoverable", "verified_at": "M1+M3", "actual": "M1.3+M1.4 validated"},
-    "K8_test_coverage": {"target": "core algo >=70%", "verified_at": "ongoing", "actual": "96% overall (74 cases); providers/asr 99% (M1.5)"},
-    "K9_raw_deleted": {"target": "100%", "verified_at": "M3.8", "actual": "M1.5 LocalWhisperProvider 不复制/外传音频; audio.wav cleanup 由 M1.8 兑现"},
-    "K10_no_original_path": {"target": "100%", "verified_at": "M3.4+M3.5", "actual": "schema-level enforced + 本地 ASR 强化 (音频从未离开本地)"},
-    "K11_agreement_block": {"target": "100%", "verified_at": "M3.9", "actual": "schema-ready (enforcement deferred to M3.9)"}
+  },
+  "kpi_tracking": {
+    "K1_binding_accuracy": {
+      "target": ">=0.7",
+      "verified_at": "M2b.5",
+      "actual": null
+    },
+    "K2_evidence_recall": {
+      "target": ">=0.8",
+      "verified_at": "M2b.5",
+      "actual": null
+    },
+    "K3_fallback_ratio": {
+      "target": "<=0.3",
+      "verified_at": "M2b.5",
+      "actual": null
+    },
+    "K4_user_score": {
+      "target": ">=4/5",
+      "verified_at": "M4.2",
+      "actual": null
+    },
+    "K5_manual_tune_time": {
+      "target": "<=1h/film",
+      "verified_at": "M4.5",
+      "actual": null
+    },
+    "K6_e2e_duration": {
+      "target": "<=16min/90min",
+      "verified_at": "M4.5",
+      "actual": null
+    },
+    "K7_resume": {
+      "target": "subprocess kill recoverable",
+      "verified_at": "M1+M3",
+      "actual": "M1.3+M1.4 validated"
+    },
+    "K8_test_coverage": {
+      "target": "core algo >=70%",
+      "verified_at": "ongoing",
+      "actual": "96% overall (74 cases); providers/asr 99% (M1.5)"
+    },
+    "K9_raw_deleted": {
+      "target": "100%",
+      "verified_at": "M3.8",
+      "actual": "M1.5 LocalWhisperProvider 不复制/外传音频; audio.wav cleanup 由 M1.8 兑现"
+    },
+    "K10_no_original_path": {
+      "target": "100%",
+      "verified_at": "M3.4+M3.5",
+      "actual": "schema-level enforced + 本地 ASR 强化 (音频从未离开本地)"
+    },
+    "K11_agreement_block": {
+      "target": "100%",
+      "verified_at": "M3.9",
+      "actual": "schema-ready (enforcement deferred to M3.9)"
+    }
   },
   "tech_debt": {
     "LIM_9_infinite_self_check_recursion_risk": {
