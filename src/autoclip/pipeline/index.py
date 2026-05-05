@@ -241,7 +241,8 @@ def run_index(job_dir: Path) -> None:
         audio_path.name,
         type(provider).__name__,
     )
-    asr_result: ASRResult = provider.transcribe(audio_path)
+    settings = get_settings()
+    asr_result: ASRResult = provider.transcribe(audio_path, language=settings.whisper_language)
     _atomic_write_json(asr_path, asr_result.to_dict())
     logger.info(
         "[index] asr.json written: n_sentences={} language={} provider={}",

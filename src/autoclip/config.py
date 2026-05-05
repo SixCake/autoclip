@@ -52,6 +52,13 @@ class Settings(BaseSettings):
             "'default' lets faster-whisper choose per device (int8 on CPU, float16 on GPU)."
         ),
     )
+    whisper_language: str | None = Field(
+        default=None,
+        description=(
+            "ASR language code: 'en' / 'zh' / 'ja' / etc., or None for auto-detection. "
+            "Default None (Whisper auto-detects). Set explicitly if auto-detection fails."
+        ),
+    )
 
     # === Tongyi Qianwen LLM ===
     dashscope_api_key: SecretStr = Field(

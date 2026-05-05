@@ -324,7 +324,7 @@ def test_run_index_happy_path_full_flow(job_dir: Path):
     # provider built once
     fac_mock.assert_called_once_with()
     # transcribe called with audio path
-    fake_provider.transcribe.assert_called_once_with(job_dir / AUDIO_FILENAME)
+    fake_provider.transcribe.assert_called_once_with(job_dir / AUDIO_FILENAME, language=None)
 
     # shots.json content
     shots_payload = json.loads((job_dir / SHOTS_FILENAME).read_text(encoding="utf-8"))
