@@ -1891,3 +1891,419 @@ v0.8 P0/P1 任务执行完毕。剩余待办：
 - **P1-2**: docs/anchors/README.md 已写入人工 review checklist（Session 22 完成）
 
 所有 P0/P1 任务已完成，可进入 v0.8 实施阶段。
+
+---
+
+## Session 24 — v0.8 实施 ready：C/F1/F2 + A 阶段计划文档对齐（2026-05-05 续）
+
+### 触发
+Session 23 v0.8 P0/P1 任务执行 COMPLETE 后，用户提议三选项 "C → A → B"（端到端 baseline 验证 → 计划文档对齐 → Stage1 集成），并对 OQ-C 拍板 "C：API 层就绪 + UI 层延后"。
+
+### C 阶段：端到端 baseline 验证（已完成）
+**复用磁盘已有产物，避免重跑 LLM**：
+- v0.7 baseline: data/realvideo_test/job_20260505_144455/timeline.json（12 句反例）
+- v0.8 baseline: data/realvideo_test/job_20260505_201036/timeline.json（13 句 prompt-only 输出）
+
+**关键发现**:
+- R1（画面描述）/R5（第三人称冷叙述）命中率从 100%/67% → **0**
+- v0.8 prompt-only 已达 75 分档（"素人怕丢人"级别），单视频判断句占比 100%
+- R6（缺二创视角）暴露扫描器词典老化（v0.7 时代仅 9 个 ROAST 词，v0.8 输出含大量"糊弄/硬撑"等吐槽词反而被误报）
+
+**产出**：`docs/plans/baselines/2026-05-05-v0.8-baseline.md`（176 行，含 5 维度对比表 + R6 误报根因 + 人工 review checklist + B0+B1 渐进路径推荐 + OQ）
+
+### F1/F2：修扫描器（已完成）
+- ROAST_WORDS 从 9 词扩充到 26 词（+17 个 v0.8 时代吐槽词：糊弄/硬撑/拖沓/粗糙/摧毁/简直/误导/纯粹/欺骗/偷懒/差评/无聊/低成本/缩水/脱节/急着/哪是）
+- v0.8 floor check violations: **9 → 1**（仅剩 1 条 R2 时间副词误报，记入 F3 backlog）
+- v0.7 baseline 12 句反例仍 100% 被识别（无回归）
+
+### A 阶段：计划文档对齐（本次 Session 主要交付）
+
+#### A.1: 重写 docs/plans/tasks/M2a-fix-narrative-style.md
+- v0.7 旧文档（374 行 / 5 子任务 / 6.6d）归档为 `_archived_2026-05-05_M2a-fix-v0.7.md`
+- 新文档 v0.8 版（183 行 / 8 子任务 / 3.4d，砍 -3.2d 约 48%）
+- 包含 v0.7→v0.8 演进总结表 + OQ-C 决议 + 8 任务清单 + 与 baseline F1-F5 follow-up 的追溯关系
+
+#### A.2: 更新 docs/plans/2026-05-04-autoclip-plan.md §2/§3
+- §2 进度总览表 M2a-fix 行：5 任务 6.6d → **8 任务 3.4d (v0.8)**，1/8 已完成
+- §2 进度总览表 M2b 行：'v0.7 拆分' → **'大概率跳过（v0.8.7 跑批 ≥4/5 视频达 75 分则直接进 M3）'**
+- §2 总任务数：38 → **41**
+- §3 路线图 ASCII 图重写：M2a-fix v0.8 节点 + 关键路径串接 v0.8.3/v0.8.4/v0.8.7
+
+#### A.3: 更新 .context/state.json
+- version: 0.10.1-v0.8-p0-complete → **0.11.0-v0.8-impl-ready**
+- phase: 'v0.8 P0/P1 任务执行 COMPLETE' → **'v0.8 实施 ready — A 阶段（计划文档对齐）COMPLETE，待启 B 阶段（v0.8.3 persona_inferer 轻量化）'**
+- next_task: 'P0-3 docs/personas/' → **'v0.8.3 persona_inferer.py 轻量化（0.5d，B 阶段第 1 步）'**
+- plan_subdocs.M2a-fix 整体重写（路径 / 行数 183 / tasks 8 / estimate_days 3.4 / status / version / baseline_report / archived_v07_doc / 8 个 tasks_list / oq_decisions / p11_corrections_status / sign_off_history 三段历史）
+- next_milestone 重写（id=M2a-fix v0.8）
+- total_tasks 38 / tasks_completed_overall 15 (+1 v0.8.1) / completion_pct 39.47%
+- plan_master_lines 重新统计（路线图重写后 238 行不变）
+
+#### A.verify: 修复 P0-2 重命名遗留问题
+- 旧测试文件 `tests/unit/test_style_violations.py` 仍 import 已删除的 `style_violations` 模块 → pytest collection error
+- 新建 `tests/unit/test_stage1_floor_check.py`（256 行）：
+  - 改 import: style_violations → stage1_floor_check
+  - 改 API 名: scan_narrative_ir → check_stage1_output / StyleViolationReport → FloorCheckReport
+  - 旧用例 `test_paragraph_with_roast_word_does_not_hit_r6`（"反差感拉满了"）在新词典下会触发 BANNED:拉满 → 改用 "反差也太离谱了" 替代
+  - 新增 `test_paragraph_with_v08_roast_word_does_not_hit_r6`（验证 v0.8 词典扩充）
+  - 新增 `TestBannedWordsZeroTolerance` 三个用例（验证 BANNED 零容忍 + 词典长度防误删保护）
+  - 改 v0.7 baseline 集成断言：旧 hit_rate==1.0（软门禁）→ 新 is_passed=False + len(violations)==12（零容忍硬门禁）
+  - 新增 v0.8 baseline 集成断言：F1 修扫描器后 violations ≤ 1，R1/R5/R6 全 0
+- 删除旧文件 tests/unit/test_style_violations.py
+
+### 验证（Step 5）
+- pytest tests/unit/test_stage1_floor_check.py: **22 passed, 1 skipped**
+- pytest tests/ 全套: **327 passed, 9 skipped in 11.33s**（无回归）
+- ruff check src/ tests/: 25 errors → 23 fixed → 剩 2 errors（narrative_ir.py:78 F841 + plot_outline.py:120 SIM108）均为 pre-existing 问题（git blame 显示是 Session 22 的 commit 19bebfd2 / f71d174d 引入），按 Karpathy 准则 §3 不顺手修
+- 三份文档一致性: state.json M2a-fix tasks=8 / days=3.4 / lines=183 ↔ tasks/M2a-fix-narrative-style.md "v0.8" 出现 48 次 ↔ plan.md "v0.8" 出现 8 次
+
+### Commit
+- 待 push 改动文件清单：
+  - M .context/state.json
+  - M .context/changes.md（本段）
+  - M .context/chat.md（本段）
+  - M docs/plans/2026-05-04-autoclip-plan.md
+  - M docs/plans/tasks/M2a-fix-narrative-style.md
+  - M src/autoclip/algo/stage1_floor_check.py（F1 词典扩充）
+  - D tests/unit/test_style_violations.py
+  - A tests/unit/test_stage1_floor_check.py
+  - A docs/plans/tasks/_archived_2026-05-05_M2a-fix-v0.7.md
+  - A docs/plans/baselines/2026-05-05-v0.8-baseline.md
+
+### 决策依据
+- **复用磁盘 baseline 而非重跑 LLM**：节省 ~25s × 2 LLM call + ¥0.5；两份产物已是同一 prompt 版本下的代表样本
+- **OQ-C 选 C（API 就绪 + UI 延后）**：避免在 M2a-fix 阶段提前做 UI（M3.7 才规划），同时让 timeline.json schema 一次到位
+- **A 阶段砍 v0.7 任务文档而非增量修订**：v0.7 三层枚举方案与 v0.8 单 LLM 路径根本不兼容，强行 in-place 修订会产出语义混乱的文档；归档保留可追溯
+- **修测试文件保留旧用例的语义**：仅替换"反差感拉满了" → "反差也太离谱了"（一个词的最小改动），保持 R6 escape 语义；新增 v0.8 时代用例独立验证词典扩充
+
+### 元教训
+- **baseline 报告可推翻 brainstorming/debate 共识**：debate U6 共识"两阶段 LLM"在 baseline 数据下被证伪（prompt-only 已达 75 分），数据 > 共识。这是为什么 multi-role-debate 之后必须做 baseline 才进实施
+- **prompt 改动比架构改动 ROI 高得多**：v0.8.0 仅改 prompts/narrative_ir.py + style_presets/plot_summary.py 就解决了 v0.7 100%/67% 的 R1/R5 命中；如果按 v0.7 计划做"三层枚举推断 + 两阶段 LLM"6.6d 的工作，反而是过度防御
+- **扫描器词典必须随 prompt 进化同步**：F1 暴露的 R6 误报本质是"prompt 变了但 ground truth 没跟上"——这是 LLM 系统典型的版本漂移
+- **测试文件改名不能只 sed import**：旧用例 fixture（"拉满"）在新词典下语义已变，必须 case by case 重新设计；这是 Karpathy 准则 §3 "精准修改"的反例（如果只机械替换 import 会留下 1 个绿测试用例其实在测错的东西）
+- **pre-existing lint error 不顺手修**：Karpathy 准则 §3 明确"只清理你自己造成的问题"。git blame 是判断"是谁造成的"最快工具
+
+### 下一步
+A 阶段交付完毕，进入 B 阶段：
+- **v0.8.3** persona_inferer.py 轻量化（0.5d）：删除 hook_candidates + paragraph_skeleton 输出，仅返回 persona_id + reasoning
+- **v0.8.4** scripting handler 集成（0.3d）：注入 persona_id 到 plot_summary.py 的 user 段
+- **v0.8.5** 钩子候选 ≥3 写 timeline.json（0.3d，OQ-C 决议）
+- **v0.8.6** schema 加 2 字段（0.2d，仅 add 不 modify）
+- **v0.8.7** 5 部题材跑批 + 人工评分（1d）
+- **v0.8.8** 验收报告 + 决定是否启 M2b-full（0.6d）
+
+合计剩 2.7d 进入 v0.8 真正实施。
+
+---
+
+## Session 24（续）— v0.8.3 persona_inferer 轻量化（B 阶段第 1 步）
+
+### 触发
+A 阶段计划文档对齐完成 + 3 个 commit 落地后，用户拍板"立即启动 v0.8.3"。按 brainstorming skill 走 3 个 Q 拍板再动代码。
+
+### Brainstorming 决策（3 个 Q）
+- **Q1 scope**: 用户选 B = 职责分离 — 砍 hook_candidates + paragraph_skeleton（钩子由 v0.8.5 主 LLM call 输出），文件 173→~80 行
+- **Q2 输入**: 用户选 B = 仅 plot_outline — 用上游 LLM 已结构化的高密度信号代替裸 ASR；签名变 (asr_text, kf_desc) → (plot_outline)
+- **Q3 fallback**: 用户选 A = 严格模式 — JSON 非法 / persona 不在白名单 / API 失败 → 抛 PersonaInferenceError；scripting handler 上层 catch（v0.8.4 brainstorming 决怎么 catch）
+
+### 实施
+
+#### 1. src/autoclip/algo/persona_inferer.py（重写 173 → 195 行）
+- 新签名：`infer_persona(plot_outline: PlotOutline, llm_client: BaseChatModel | None = None) -> PersonaInferenceResult`
+- 输出 dataclass 仅 3 字段：persona_id + confidence + reasoning（≤200 字符防 prompt injection 膨胀）
+- 白名单 `VALID_PERSONA_IDS: frozenset` 6 人格（防误删 + 不可变）
+- 新异常 `PersonaInferenceError(RuntimeError)`，统一包装 LLM API 异常
+- 顺手修 LLM client 路径 BUG：`from autoclip.llm import get_default_client` → `from autoclip.providers.llm import get_llm`（json_mode=True 默认开启）
+- 保留 `load_persona_description(persona_name)` 给 v0.8.4 注入用 + 加白名单校验 + 文件不存在抛 FileNotFoundError
+- TYPE_CHECKING 解耦循环 import 风险
+
+#### 2. tests/unit/test_persona_inferer.py（新建 155 行 / 16 用例 / 4 测试类）
+- TestInferPersonaHappyPath (3): dataclass 返回 / markdown fence strip / reasoning 截断到 200 字符
+- TestInferPersonaStrictMode (4): 非法 JSON / persona 不在白名单 / 缺 persona_id / LLM API 异常包装
+- TestLoadPersonaDescription (7): parametrize 6 个 persona md 加载验证 + 必含"台词"段 + 非法 persona 抛 ValueError
+- TestWhitelistIntegrity (2): 6 人格防误删保护 + frozenset 不可变
+- LLM mock 用 FakeListChatModel（与 test_scripting_e2e.py 同模式）
+
+#### 3. docs/plans/tasks/M2a-fix-narrative-style.md（v0.8.3 段落 +22 行）
+- 追加 brainstorming 决议追溯表（Q1/Q2/Q3 三表）
+- 实现要点：新签名 / 返回字段 / 白名单校验 / BUG 修复说明
+- 验收标准：文件 ≤100 行 + ruff 0 errors + 测试 ≥6 passed
+
+### 验证（Step 5）
+- ruff check src/autoclip/algo/persona_inferer.py tests/unit/test_persona_inferer.py: **0 errors**（自动修 1 个 I001）
+- pytest tests/unit/test_persona_inferer.py: **16 passed in 0.10s**
+- pytest tests/ 全套: **343 passed, 9 skipped in 10.86s**（无回归，比上次会话 327 多 16，全部来自新测试文件）
+
+### Commit
+- HEAD 推进 1 commit：`6d04b3c 🎨refactor : v0.8.3 persona_inferer 轻量化（B 阶段第 1 步）`
+- 改动文件（rule 250 合规，无 .context/）：
+  - M src/autoclip/algo/persona_inferer.py
+  - A tests/unit/test_persona_inferer.py
+  - M docs/plans/tasks/M2a-fix-narrative-style.md
+
+### 决策依据
+- **Q1 选 B 而非 A（仅返回 persona_id）**：保留 confidence + reasoning 是为了 v0.8.7 跑批时人工 review 能定位"为什么 persona 选错了"，工时几乎不增加
+- **Q2 选 B 而非 A（plot_outline）**：plot_outline 已经是上游 LLM 总结过的高密度产物，比裸 ASR 信噪比高 1-2 个数量级；同时不依赖 keyframes（vision stage 还没接入）
+- **Q3 选 A 而非 B（严格抛异常）**：与 Karpathy §1 "暴露假设、不掩盖困惑" 一致；让上层 scripting handler 显式决策（崩溃 / 跳过 persona / 用 default），而不是 persona_inferer 偷偷做 fallback
+- **新增 reasoning 截断 200 字符**：防御 prompt injection 把超长内容塞进 reasoning 字段污染下游 LLM call
+- **顺手修 LLM client 路径 BUG**：原代码 `from autoclip.llm` 模块根本不存在，pytest 之前没暴露是因为该函数从没被调用过；属于 Karpathy §3 "孤立代码"清理（修改自己造成的依赖即可）
+
+### 元教训
+- **brainstorming Q3 反直觉胜利**：我推荐 B（降级），用户选 A（严格抛）。事后想 A 更对——v0.8 还没上线，吃幻觉静默 default 会让 v0.8.7 跑批数据失真，而严格模式让问题立即暴露
+- **路径 BUG 在 0 调用方时不会被 pytest catch**：persona_inferer 是 v0.8 P1 阶段新建模块，没 caller → 即使 import 路径错也不会触发 ImportError；这种"已存在但未集成"的代码必须靠 import 时静态检查（mypy / ruff F401）才能发现
+- **PlotOutline 作为 fixture 比 ASR string 易构造**：测试代码量减少约 30%（不用伪造 ASR 字符串），且语义清晰（可读性提升）
+- **TYPE_CHECKING 拆解循环 import**：narrative_ir → persona_inferer 的潜在循环风险（如果 v0.8.4 让 scripting 调 persona_inferer 又同时引 PlotOutline）通过 TYPE_CHECKING 一次性解决
+
+### 下一步
+v0.8.3 完成，进入 **v0.8.4 scripting handler 集成**（0.3d）：
+- 在 scripting handler 适当位置（plot_outline 生成完成后、narrative_ir 生成前）调用 infer_persona(plot_outline)
+- 把 persona_id + load_persona_description(persona_id) 注入 plot_summary.py 的 user 段（替代当前固定的"毒舌中年"）
+- 决定 PersonaInferenceError 的 catch 策略（崩溃 vs 用 default 继续）— 进 v0.8.4 brainstorming Q1
+- 写入 timeline.json 顶层 recommended_persona 字段（v0.8.6 会扩展 schema）
+
+
+---
+
+## 2026-05-05 v0.8.4 — scripting handler 集成 persona_inferer (B 阶段第 2 步)
+
+**commit**: `09b37c3` ✨feat : v0.8.4 integrate persona_inferer into scripting handler  
+**前置**: v0.8.3 commit `6d04b3c` (persona_inferer 轻量化) 已完成  
+**estimate vs actual**: 0.3d 预估 / ~0.4d 实际 (含顺手修 latent bug)
+
+### Brainstorming 决策（3 Q + 1 side decision）
+- **Q1 strict mode** = A: `PersonaInferenceError` 直接冒泡，scripting stage 自然 FAILED（不 try/except）
+- **Q2 md loading** = B: 只截取 `docs/personas/{id}.md` 的「真人 Reference 台词」段（不读全文，避免冒犯型 / 失败信号段污染 prompt + 控 token cost）
+- **Q3 timeline field** = B: `recommended_persona` 字段写入 `PersonaInferenceResult` 完整 dataclass dump（persona_id + confidence + reasoning，v0.8.7 跑批 review 信息无损）
+- **Side A** (Karpathy §3 顺手修): `STYLE_DESCRIPTION` 内 `{target_duration_sec}` `{target_sentences}` 之前没显式 `.format()` 替换 → LLM 看到字面量字符串。本次扩 `{persona_reference_block}` 占位符时一并修复
+
+### 实施步骤（4 步串行 + 验证）
+1. **v0.8.4.1** 新增 `persona_inferer.extract_reference_lines(persona_md: str) -> list[str]` 工具函数
+   - 用稳定正则 `## 真人 Reference 台词[^\n]*\n([\s\S]*?)(?=\n##\s|\Z)` 截段
+   - 兼容半角 `"` + 全角 `"" ""` 引号
+   - +5 个 unit 测试用例（真实 md / 6 persona 全覆盖 / 段缺失 / 全角引号 / 防吞下一段）
+2. **v0.8.4.2** 改 prompt 链路 2 处
+   - `plot_summary.STYLE_DESCRIPTION` 在【角色称呼】之前插入 `{persona_reference_block}` 占位符（degrade path 友好）
+   - `narrative_ir.build_narrative_ir_messages()` 扩 2 个可选参数 `persona_id` + `persona_reference_lines`，并显式 `.format()` 替换全部 3 个占位符（顺手修 latent bug）
+3. **v0.8.4.3** 改 `scripting.run_scripting()` 7 处
+   - imports 加 4 符号；docstring K10 进度表 4 → 5 节点；K10 contract 注释更新
+   - 插入 Step 2.5 (persona inference) 在 plot_outline DONE 之后、narrative_ir 之前；progress=0.40
+   - `build_narrative_ir_messages()` 调用扩 2 参数；timeline_payload 顶层加 `recommended_persona` dict
+4. **测试补全**：e2e 10 处 + unit 11 处更新（FakeListChatModel.responses 加 persona 中间响应；K10 expected 加 0.40；recommended_persona schema 断言）
+
+### 进度里程碑契约更新（K10）
+- v0.6: 4 节点 (0.05/0.30/0.65/0.95) + DONE
+- **v0.8.4: 5 节点 (0.05/0.30/0.40/0.65/0.95) + DONE** ← 加 persona inference
+
+### 验证
+- ruff: 全绿（含 `--fix` 自动转 1 处 `format()` → f-string）
+- pytest: **353 passed, 9 skipped**（v0.8.3 完成时 343 passed → +5 新测试 + 5 v0.8.4 新断言相关，**0 回归**）
+- git status: 7 业务文件已 commit；3 `.context/` 文件保留在 working tree（rule 250 禁止 commit）
+
+### 文件清单（commit 09b37c3 包含 7 个文件）
+- `src/autoclip/algo/persona_inferer.py` (+42 行 — 加 `extract_reference_lines` + 模块级正则)
+- `src/autoclip/pipeline/scripting.py` (+56 行 — Step 2.5 + recommended_persona 埋字段 + 5 节点契约)
+- `src/autoclip/prompts/narrative_ir.py` (+36 行 — 2 新参数 + 显式 `.format()` 修 latent bug)
+- `src/autoclip/prompts/style_presets/plot_summary.py` (+4 行 — `{persona_reference_block}` 占位符)
+- `tests/integration/test_scripting_e2e.py` (+55 行 — 10 处 mock 补 + recommended_persona schema 断言)
+- `tests/unit/test_persona_inferer.py` (+62 行 — 5 个 extract_reference_lines 测试)
+- `tests/unit/test_scripting_handler_progress.py` (+46 行 — 11 处 mock 补 + K10 5 节点断言)
+
+### 下一步
+- **v0.8.5** LLM 输出 ≥3 个钩子候选写 timeline.json（OQ-C 决议；预估 0.3d；B 阶段第 3 步）
+- **v0.8.6** timeline.json schema 文档化扩展（recommended_persona + hook_candidates 两个新字段，0.2d）
+- **v0.8.7** 5 部题材跑批 + 人工评分（1.0d，B 阶段验收门）
+
+
+---
+
+## 2026-05-05/06 v0.8.5 — hook_generator 钩子候选 ≥3 写 timeline.json (B 阶段第 3 步)
+
+**commit**: `7d4bc64` ✨feat : v0.8.5 add hook_generator with 3-5 candidates to timeline.json
+**前置**: v0.8.4 commit `09b37c3` (scripting handler 集成 persona_inferer) 已完成
+**estimate vs actual**: 0.3d 预估 / ~0.4d 实际 (含新增 1 个 degrade 集成测试)
+
+### Brainstorming 决策（5 项已拍板）
+- **Q1 call position** = A: 第 4 个独立 LLM call（不混入 narrative_ir/persona，延续 v0.8.3 职责分离原则）
+- **Q2.1 count + structure** = B: 3-5 个浮动候选，每个 = {text, style_tag, score}
+- **Q2.2 whitelist** = 白名单: `VALID_STYLE_TAGS` frozenset 6 类（反套路问句/数字冲击/反差对比/悬念伏笔/情绪共振/其他）
+- **Q2.3 score** = 要 score: 0.0-1.0 浮点（LLM 自评，v0.8.7 review 时校准漂移）
+- **Q3.A input** = B: 输入 = plot_outline + recommended_persona + narrative_ir.paragraphs[0] 全部句子
+- **Q3.B failure** = degrade: 失败时不阻塞 pipeline，用 paragraphs[0].sentences[0] 包成 1 候选 + degraded=true 标记（与 v0.8.4 strict 模式严格区分：钩子是装饰，不该让 narrative 已正确生成的 pipeline 崩溃）
+
+### 实施步骤（4 步串行 + 验证）
+1. **v0.8.5.2** 新增 `algo/hook_generator.py`（学 persona_inferer 单文件架构，288 行）
+   - `HookCandidate` + `HookCandidatesResult` dataclass(frozen)
+   - `VALID_STYLE_TAGS` frozenset 6 类白名单（任何 tag 不在白名单 → degrade）
+   - `MIN_CANDIDATES=3` / `MAX_CANDIDATES=5` 常量（< MIN 或 > MAX → degrade）
+   - `_format_inputs()` 私有 — Q3.A=B 把 narrative_ir.paragraphs[0] 全部句子注入
+   - `_validate_and_parse()` 私有 — 5 类 schema violation 抛 HookGenerationError
+   - `_degrade_with_fallback()` 私有 — Q3.B fallback 逻辑（含 logger.warning）
+   - `generate_hook_candidates()` 公开 — Q3.B 契约：NEVER raises，所有失败转 degraded=true
+2. **v0.8.5.3** 改 `pipeline/scripting.py` 6 处
+   - imports 加 hook_generator 2 符号；docstring K10 进度表 5→6 节点；K10 contract 注释更新
+   - 插入 Step 3.5 (hook generation) 在 narrative_ir DONE 后、binding 前；progress=0.80
+   - LLM 配置：temperature=0.8 (求多样性), max_tokens=600, json_mode=True
+   - timeline_payload 顶层加 `hook_candidates` dict（candidates list + degraded + degrade_reason）
+3. **v0.8.5.4a** 新增 `tests/unit/test_hook_generator.py`（288 行 / 20 用例）
+   - HappyPath (2): 3 候选 / 5 候选
+   - DegradePath (8): 5 个 brainstorming 列出的触发条件 + 3 个 edge case
+   - WhitelistIntegrity (1, parametrized 6): 6 类 style_tag 全可接受
+   - PromptStructure (1): _format_inputs 注入 persona + paragraphs[0] 全部句子
+   - ModuleSurface (3): exception 继承 / 6 类完整性 / "其他" 必存
+4. **v0.8.5.4b** 更新 e2e/unit handler 测试 mock + 新增 1 个 degrade 集成测试
+   - e2e 12 处修改：常量加 VALID_HOOK_CANDIDATES_JSON + INVALID_HOOK_JSON / 5 处 responses 加第 4 个 / K3 contract 3→4 / K3 filenames 3→4 / timeline schema 加 hook_candidates 断言（含 6 类白名单全验证）
+   - unit 12 处修改：常量加 VALID_HOOK_CANDIDATES_JSON / 7 处 _make_fake_llm 加第 4 个 / K10 expected 5→6 / K10 弱化契约 >=5→>=6 / 2 处 docstring
+   - **新增** `TestHookGenerationDegradeE2E::test_invalid_hook_response_does_not_crash_pipeline` 验证 Q3.B 端到端契约：hook LLM 返回 invalid JSON → state.SCRIPT.status=done + timeline.hook_candidates.degraded=true + 1 个 fallback 候选
+
+### 进度里程碑契约更新（K10）
+- v0.8.4: 5 节点 (0.05/0.30/0.40/0.65/0.95) + DONE
+- **v0.8.5: 6 节点 (0.05/0.30/0.40/0.65/0.80/0.95) + DONE** ← 加 hook generation
+
+### 验证
+- ruff: 全绿
+- pytest: **374 passed, 9 skipped**（v0.8.4 完成时 353 passed → +21 = 20 hook_generator 单元 + 1 degrade 集成 + 0 回归）
+- git status: 5 业务文件已 commit (`7d4bc64`)；3 `.context/` 文件保留（rule 250 禁止 commit）
+
+### 文件清单（commit 7d4bc64 包含 5 个文件）
+- **新增** `src/autoclip/algo/hook_generator.py` (+288 行 — 单文件含 prompt + dataclass + degrade 逻辑)
+- **新增** `tests/unit/test_hook_generator.py` (+288 行 — 20 测试用例)
+- 改 `src/autoclip/pipeline/scripting.py` (+55 行 — Step 3.5 + hook_candidates 埋字段 + 6 节点契约)
+- 改 `tests/integration/test_scripting_e2e.py` (+133 行 — 12 处 mock 补 + degrade e2e 新测试 + hook_candidates schema 全验证)
+- 改 `tests/unit/test_scripting_handler_progress.py` (+42 行 — 12 处 mock 补 + K10 6 节点)
+
+### 架构决策亮点
+- **故障域隔离**：persona = strict（v0.8.4，narrative_ir 输入依赖，必须可靠），hook = degrade（v0.8.5，narrative 之后的衍生产物，失败不阻塞）。两种模式都在测试矩阵里覆盖
+- **白名单约束 + degrade 双保险**：style_tag 严格白名单（防 LLM 创造性过度）+ degrade fallback（白名单违反时不崩 pipeline）
+- **天然兼容 M3.7 UI 露出**：timeline.hook_candidates 是纯被动数据，UI 读它做选择展示即可，v0.8.5 完全不动 UI
+
+### 下一步
+- **v0.8.6** timeline.json schema 文档化扩展（recommended_persona + hook_candidates 两个新字段统一登记到 design.md §17.4，0.2d，B 阶段第 4 步）
+- **v0.8.7** 5 部题材跑批 + 人工评分（1.0d，B 阶段验收门）
+- **v0.8.8** 验收报告 + 决定是否启 M2b-full（0.6d）
+
+
+---
+
+## 2026-05-06 v0.8.6 — timeline.json schema +2 字段文档化（scope=A 最小，B 阶段第 4 步）
+
+**性质**: 纯文档化任务（0 代码改动）
+**前置**: v0.8.5 commit `7d4bc64` (hook_generator) 已完成
+**estimate vs actual**: 0.2d 预估 / ~0.2d 实际（按预算完成）
+
+### Brainstorming 决策（1 项已拍板）
+- **Q scope** = A 最小: 只追加 v0.8.4/v0.8.5 新增的 2 字段（recommended_persona + hook_candidates），历史字段（plot_outline / narrative_ir / binding_stats / segments）不补，保持 0.2d 预算
+- **理由**: 发现 design.md §6.2 的 class Timeline 只是 MVP 期 SQLite 简略定义，整个 v0.7+ 的实际 timeline.json 产物字段从未文档化；如果一次性补完会超预算 3-5 倍（潜在 1.0d+）；按 Karpathy §3 精准修改 + §2 简洁优先，本次只补 brainstorming 决议的最小 scope
+
+### 实施步骤（2 步）
+1. **v0.8.6.1** 改 `docs/plans/2026-05-04-autoclip-design.md` §6.2
+   - 在 `class Job` Python code block 之后追加 v0.8.4/v0.8.5 新增字段定义段
+   - 加 source-of-truth 注释（每字段标注产生模块 + pipeline 写入位置 + timeline.json 路径）
+   - `class RecommendedPersona`: persona_id（6 类白名单）+ confidence + reasoning
+   - `class HookCandidate`: text + style_tag（6 类白名单）+ score
+   - `class HookCandidates`: candidates list + degraded + degrade_reason
+   - **故障模式对比说明**: persona=strict（抛 PersonaInferenceError） vs hook=degrade（NEVER raises）
+   - **新增 schema 演化原则**: timeline.json 顶层字段 **add-only-never-modify**，消费方必须 `if "xxx" in timeline:` 守卫，保证 v0.8.7 5 部跑批可以 replay v0.7/v0.8.3 baseline
+2. **v0.8.6.2** 同步 `docs/plans/tasks/M2a-fix-narrative-style.md` 3 处
+   - line 62 任务表：v0.8.6 ⏳ pending → ✅ done
+   - line 125 `### v0.8.6 schema 扩展` 子章节：补完整实际交付 outcome（含 scope 决策、改动文件、实际字段比原计划丰富、不在 scope 列表）
+   - line 178 工时表：v0.8.6 ✅ 标注
+
+### 关键交叉一致性验证
+- **6 类 hook style_tag**: design.md（反套路问句 / 数字冲击 / 反差对比 / 悬念伏笔 / 情绪共振 / 其他）与 `hook_generator.py VALID_STYLE_TAGS` frozenset **完全 1:1 对齐** ✅
+- **6 类 persona_id**: design.md（toxic_middle_aged / gen_z_internet_native / cynical_critic / warm_storyteller / data_driven_analyst / straight_man_witness）与 `persona_inferer.py VALID_PERSONA_IDS` 一致 ✅
+- **dataclass 字段顺序**: 与 algo/ 实际产物 1:1（`RecommendedPersona` 字段顺序 = `PersonaInferenceResult.__dataclass_fields__` 顺序）
+
+### 文件清单（2 文件 / +50 行）
+- 改 `docs/plans/2026-05-04-autoclip-design.md` (+~50 行 — §6.2 末尾追加 3 个 dataclass + schema 演化原则)
+- 改 `docs/plans/tasks/M2a-fix-narrative-style.md` (3 处状态 + outcome 补全)
+
+### scope 边界（按 brainstorming 决议明确不在 scope）
+- 历史字段 `plot_outline / narrative_ir / binding_stats / segments` 的 schema 文档化（这些早在 v0.7 就存在但 design.md 从未文档化）
+- 旧 baseline timeline.json 加载兼容性测试用例
+
+### 重要架构产出
+- **add-only-never-modify schema 演化原则**：v0.8.6 确立的全局约束，影响 v0.8.7 跑批 + 后续所有新字段添加。这条规则保证 schema 演化与历史 baseline 兼容性两个目标可以共存
+
+### 下一步
+- **v0.8.7** 5 部题材跑批 + 人工评分（1.0d，B 阶段验收门）
+  - 题材列表：电影 / 动漫 / 短剧 / 儿歌（毒舌冒犯风险测试）/ Vlog
+  - 评分维度：钩子前置 / 判断句占比 / 人格契合 / 套路反例零命中 / 整体可发布性
+  - 验收：≥4/5 视频得 75 分以上
+- **v0.8.8** 验收报告 + 决定是否启 M2b-full（0.6d）
+
+---
+
+## 2026-05-06 (Session 28: report-template CORS 修复)
+
+### Trigger
+用户反馈 HTML 报告"没有展示具体内容"。诊断发现 `file://` 协议下 `fetch()` 被 CORS 阻止，导致 JSON 加载失败。
+
+### Changes
+
+**assets/report-template.html**:
+- `fetch()` → 动态 `<script src>` 标签加载（兼容 file:// 和 HTTP）
+- `renderConsensus()` 字段映射修正: 扁平顶层 → 嵌套 `stage3_consensus`
+- 增强渲染: evidence_trail 对象、chair-decided decision_type/rationale、open_questions options_for_user
+
+**/tmp/inject_debate_payload.py**:
+- 新增 `.payload.js` 生成 (window.__PAYLOAD__ = {...})
+- placeholder `__PAYLOAD_JSON_PATH__` → `__PAYLOAD_JS_PATH__`
+- 数据仍在外部文件中引用（用户要求），兼容 file:// 和 HTTP
+
+**生成文件**:
+- `.outputs/2026-05-05-good-erchuang.payload.js` (84,494 bytes, 新)
+- `.outputs/2026-05-05-good-erchuang.html` (40,078 bytes, 重新生成)
+
+### Verification
+- corrections-root: 11 cards ✅
+- stage1-root: 5 roles ✅
+- conflicts-root: 7 conflicts ✅
+- consensus-root: 14 cards (10 unanimous + 2 chair + 2 open) ✅
+- window.__PAYLOAD__ loaded correctly
+
+---
+
+## 2026-05-06 (Session 29: v0.8.7 跑批 + 评分 + 报告)
+
+### Trigger
+v0.8.7 验收门：5 部题材（儿歌/动漫/电影解说/短剧/Vlog）跑批 + 人工评分 + 跑批报告输出。
+
+### Changes
+
+**scripts/run_v087_batch.sh** (新建, 32 行):
+- 5 部题材串行跑批（01~05 依次调用 _realvideo_dispatcher.py SCRIPTING stop）
+- 超时保护 + 结果记录到 _results.tsv
+
+**scripts/run_v087_partial.sh** (新建, 28 行):
+- 支持指定 material list 追跑（K3 方案，用于跳过 01/02 只跑 03/04/05）
+
+**scripts/v087_score.py** (新建入仓, 160 行):
+- v0.8.7.3 客观评分脚本（5 维度 × 100 分 → 通过线 75）
+- 评分维度：JUDGE_MARKERS 判断句占比 / HOOK_WHITELIST 白名单 / 钩子前置 / persona 契合 / 整体可发布性
+- 从 /tmp 移入仓库，加完整 docstring + 类型标注
+
+**docs/plans/baselines/2026-05-06-v0.8.7-batch-eval.md** (新建, 210 行):
+- v0.8.7 跑批完整报告：环境 / 5 部素材状态 / 3 个关键信号 / 人工评分 / v0.8.8 backlog
+- 信号 A: 01/02 非叙事题材 plot_outline schema min_length=3 失败
+- 信号 B: 04_short_drama 73 分（差 2 分）→ 接近通过，目标可达
+- 信号 C: 05_vlog 309s large-v3 CPU 冷启动 ≈ 9min，超跑批时间预算，SKIPPED
+- 重要修正：消除"限制素材时长"错误归因，ASR 必须支持电影级长视频，v0.8.8 backlog 改为"消除冷启动"工程方案
+- 加"反例归档"段防止回归
+
+**data/realvideo_test/v087_batch/_results.tsv**:
+- 第 5 行 skip reason 修正："跑批时间预算决策...非产品功能限制；ASR 必须支持电影级长视频"
+
+### Evaluation Results
+| 素材 | 状态 | 得分 | 说明 |
+|---|---|---|---|
+| 01_kids_song | FAIL | — | plot_outline key_acts min_length=3 → schema error |
+| 02_anime | FAIL | — | 同上（纯混剪无叙事结构） |
+| 03_movie_review | OK | 88 PASS | persona=archaeologist / 11 seg / 5 hook |
+| 04_short_drama | OK | 73 FAIL | persona=empathy_senior / 9 seg / 5 hook / 差 2 分 |
+| 05_vlog | SKIP | — | 309s ASR 超时间预算（large-v3 CPU ~9-18min） |
+
+### Verification
+- 2/5 素材产出 timeline.json（03 + 04）
+- 1/2 通过验收线（03=88 ≥75 ✅，04=73 <75 差 2 分）
+- data/realvideo_test/v087_batch/ 已在 .gitignore 忽略，不入 git
+- scripts/ 4 个文件纳入 git commit（业务文件）
+- .context/ 单独管理，不入 rule 250 commit

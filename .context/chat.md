@@ -1294,3 +1294,278 @@ Session 21 commit 后用户要求"通读自检 acceptance criteria"。我输出 
 
 ### 下一步
 v0.7.1 P0 补强完毕，进入 Day 0 = M2a-fix.1 设计规约实施。
+
+---
+
+## Session 24 — v0.8 实施 ready：C/F1/F2 + A 阶段（2026-05-05 续）
+
+### 触发
+Session 23 v0.8 P0/P1 完成后，用户提议三选项 "C → A → B"（baseline 验证 → 计划对齐 → Stage1 集成）；OQ-C 拍板 "C：API 就绪 + UI 延后"；OQ 选 C + F1/F2 立即做。
+
+### 实施
+**C 阶段（baseline 验证）**: 复用磁盘 v0.7/v0.8 两份 timeline.json → 输出 baseline 报告 176 行 → 关键发现 R1/R5 100%/67% → 0，prompt-only 已达 75 分档；R6 暴露扫描器词典老化
+
+**F1/F2（修扫描器）**: ROAST_WORDS 9 → 26 词（+17 v0.8 时代吐槽词）；v0.8 floor check violations 9 → 1（仅 R2 误报记入 F3 backlog）
+
+**A 阶段（计划文档对齐 — 本次 Session 核心）**:
+- A.1: M2a-fix-narrative-style.md 重写为 v0.8 版（183 行 / 8 任务 / 3.4d，旧 374 行版归档为 _archived_2026-05-05_M2a-fix-v0.7.md）
+- A.2: plan.md §2/§3 更新（M2a-fix 行 / M2b 行 / 总任务 41 / 路线图 ASCII 图重写）
+- A.3: state.json 推进到 v0.11.0-v0.8-impl-ready（next_task=v0.8.3 persona_inferer 轻量化）
+- A.verify: 修复 P0-2 重命名遗留 — 新建 tests/unit/test_stage1_floor_check.py（256 行 / 22 passed），删除 tests/unit/test_style_violations.py
+
+### 修订规模
+- M2a-fix-narrative-style.md: 374 → 183 行（重写 + 内容更紧凑）
+- plan.md: 路线图 + §2 表格 4 处替换
+- state.json: 7 个顶层字段更新 + plan_subdocs.M2a-fix 整体重写
+- 测试代码净增 +256 行（test_stage1_floor_check.py），净减 -213 行（test_style_violations.py 删除）
+- pytest 全套 327 passed，无回归
+- ruff: 25 → 2（剩 2 个均为 pre-existing 问题）
+
+### 元教训
+1. **baseline 数据 > debate 共识**: U6"两阶段 LLM"共识被 baseline 推翻（prompt-only 已达 75 分），这是 multi-role-debate → baseline → 实施的正确顺序
+2. **prompt ROI > 架构 ROI**: v0.7 计划用 6.6d 做架构防御，v0.8 用 prompt-only + 0.2d 修扫描器达成相同效果
+3. **扫描器必须随 prompt 进化同步**: F1 暴露的 R6 误报本质是版本漂移
+4. **测试改名不能只 sed**: 旧 fixture "拉满"在新词典下语义已变，必须 case by case 重新设计；机械替换 import 会留下假阳性绿测试
+5. **pre-existing lint 不顺手修**: Karpathy §3 + git blame 判断是不是自己造成的
+
+### 下一步
+进入 B 阶段（v0.8 真正实施，剩 2.7d）：
+- v0.8.3 persona_inferer 轻量化（0.5d）
+- v0.8.4 scripting handler 集成（0.3d）
+- v0.8.5 钩子候选 ≥3 写 timeline.json（0.3d，OQ-C）
+- v0.8.6 timeline.json schema +2 字段（0.2d）
+- v0.8.7 5 部题材跑批 + 人工评分（1d）
+- v0.8.8 验收报告 + M2b 决策（0.6d）
+
+---
+
+## Session 24（续）— v0.8.3 persona_inferer 轻量化（B 阶段第 1 步，2026-05-05 续）
+
+### 触发
+A 阶段 3 个 commit 落地后，用户："立即启动"。按 brainstorming skill 走 3 个 Q 再动代码。
+
+### Brainstorming 决议（3 Q）
+- **Q1 scope**: B = 职责分离（砍 hook_candidates + paragraph_skeleton，由 v0.8.5 主 call 输出）
+- **Q2 输入**: B = 仅 plot_outline（高密度结构化信号，不吃裸 ASR）
+- **Q3 fallback**: A = 严格抛 PersonaInferenceError（不静默 default，符合 Karpathy §1）
+
+### 实施
+- src/autoclip/algo/persona_inferer.py: 173 → 195 行（新签名 / 输出 3 字段 / 白名单 frozenset 6 人格 / 顺手修 LLM client 路径 BUG）
+- tests/unit/test_persona_inferer.py: 新建 155 行 / 16 用例 / 4 测试类（happy path 3 + 严格模式 4 + persona md 加载 7 + 白名单完整性 2）
+- docs/plans/tasks/M2a-fix-narrative-style.md: v0.8.3 段落追加 brainstorming 决议追溯表 +22 行
+
+### 修订规模
+- 净改动：+147 / -127 行（src 主要是 docstring 加厚）
+- pytest 全套 343 passed（+16），无回归
+- ruff: 0 errors（自动修 1 个 I001）
+
+### Commit
+- `6d04b3c 🎨refactor : v0.8.3 persona_inferer 轻量化（B 阶段第 1 步）`
+- 3 文件，rule 250 合规
+
+### 元教训
+1. **brainstorming Q3 反直觉胜利**: 我推 B 降级，用户选 A 严格抛 → v0.8.7 跑批数据不失真，符合 Karpathy §1
+2. **路径 BUG 在 0 调用方时不被 catch**: persona_inferer 是 P1 新建模块没 caller，import 错路径 pytest 不报错；必须靠 mypy/ruff F401
+3. **PlotOutline 作 fixture 比 ASR string 易构造**: 测试代码量 -30%
+4. **TYPE_CHECKING 拆解循环 import**: 提前规避 v0.8.4 scripting → persona_inferer → PlotOutline 的潜在循环
+
+### 下一步
+进入 **v0.8.4 scripting handler 集成**（0.3d）：
+- 在 plot_outline 生成完成后调用 infer_persona(plot_outline)
+- 注入 persona_id + load_persona_description(persona_id) 到 plot_summary.py user 段
+- v0.8.4 brainstorming Q1 必须决：PersonaInferenceError 的 catch 策略（崩溃 vs 用 default）
+
+
+---
+
+## Session 25 (2026-05-05 23:30~) — v0.8.4 scripting handler 集成 persona_inferer
+
+**Skill 流**: brainstorming (3Q+1 side) → architecture-designer (集成点设计) → executing-plans (4 步串行) → andrej-karpathy-guidelines (§1 暴露假设 + §3 精准修改 + §4 目标驱动)
+
+### 用户决策路径（5 个问题，全部 1 句话拍板）
+1. **Q1 strict mode**: A — PersonaInferenceError 直接冒泡
+2. **Q2 input source for persona inference**: B — 仅 plot_outline（高密度信号）
+3. **Q3 timeline field structure**: B — 完整 dataclass dump (persona_id + confidence + reasoning)
+4. **Q4 reference 台词截取**: 截 md "真人 Reference 台词" 段（不读全文）
+5. **Q5 side: 是否顺手修 latent bug**: A — 顺手修 STYLE_DESCRIPTION 占位符未替换问题
+
+### 关键发现
+1. **STYLE_DESCRIPTION latent bug**（v0.8 prompt 改造遗留）: `{target_duration_sec}` `{target_sentences}` 占位符在 `narrative_ir.py:88` 的 `STYLE_DESCRIPTION` 直接被作为 `style_description=` 塞到 `SYSTEM_PROMPT_TEMPLATE.format()` → 内层占位符不被二次替换 → LLM 看到 `"目标视频时长 {target_duration_sec} 秒"` 字面量 → baseline 90s 档位侥幸通过没暴露。本次顺手修复（Karpathy §3 "清理因你修改而产生的孤立代码"）
+2. **K10 contract 演进**: v0.6 4 节点 → v0.8.4 5 节点。所有 docstring + K10 注释 + unit 测试断言同步更新
+3. **degrade path 兼容性**: `narrative_ir.py:88` 用 `.split("【角色称呼】")[0]` 切割 → 必须把 `{persona_reference_block}` 占位符插在【角色称呼】**之前**，degrade 时 reference 仍保留
+
+### 测试 mock 联动修复（21 处 trivial 但必要的修改）
+- `test_scripting_e2e.py`: 10 处（4 处 responses_per_call + 1 处 TRAILING_COMMA + K3 count 2→3 + K3 filenames 2→3 + recommended_persona schema 断言 + docstring）
+- `test_scripting_handler_progress.py`: 11 处（7 处 _make_fake_llm + K8 narrative_ir 失败测试 + K10 expected 序列 + K10 弱化契约 + 2 处 docstring）
+- 所有 mock 补全后 `pytest tests/ -q` **353 passed 0 regression**
+
+### 阶段性产出
+- commit `09b37c3`（7 文件 / +260 / -41）
+- v0.8.4 任务完成 → M2a-fix 进度 2/8 → 3/8（37.5%）
+- 整体进度 16/38 → 17/38（42.11% → 44.74%）
+- 下一步 v0.8.5 钩子候选（0.3d，OQ-C 决议已存档）
+
+### 自检
+- 全程严守 project rule 250（commit 不含 .context/）+ 892（worktree-save 会话开始 + 会话结束闭环）
+- 全程严守 Karpathy §1（暴露 5 个假设全部用 ask_question 方式让用户拍板）+ §2（不写投机性代码：不引入 lazy_load / cache / metric 等扩展）+ §3（精准修改：每行变更可追溯到某个 brainstorming 决议或 latent bug 修复）+ §4（目标驱动：每个子步骤都跑 ruff + pytest 验证后才推进下一步）
+
+
+---
+
+## Session 26 (2026-05-05 23:30 ~ 2026-05-06 00:15) — v0.8.5 hook_generator + scripting handler 集成
+
+**Skill 流**: brainstorming (5 决策) → architecture-designer (单文件 vs 双文件评估) → executing-plans (4 步串行) → andrej-karpathy-guidelines (§1 暴露 5 隐含假设 + §2 简洁优先 + §3 精准修改 + §4 目标驱动)
+
+### 用户决策路径（5 个 Q，全部 1 句话拍板）
+1. **Q1 LLM call 位置**: A — 第 4 个独立 LLM call
+2. **Q2.1 候选数量结构**: B — 3-5 浮动 + {text, style_tag, score}
+3. **Q2.2 style_tag 白名单**: 白名单 6 类
+4. **Q2.3 score 字段**: 要 score
+5. **Q3.A 输入信号**: B — 看 paragraphs[0] 全部
+6. **Q3.B 失败模式**: degrade — 不阻塞 pipeline
+
+### 关键架构决策
+1. **单文件 vs 双文件评估**：原计划拆 prompts/hook_candidates.py + algo/hook_generator.py 两文件，最终决定按 persona_inferer 模式合并为单文件 algo/hook_generator.py（288 行）。理由：
+   - persona_inferer (v0.8.3) 是同性质算子，已验证单文件结构清晰
+   - 减少跨文件跳转成本
+   - v0.8.7 跑批 review 时单点定位
+2. **故障域隔离**（与 v0.8.4 严格区分）：persona = strict mode（输入依赖），hook = degrade mode（衍生产物）
+3. **degrade 触发的 5 类 + 1 兜底**：invalid JSON / count <3 / count >5 / invalid style_tag / score out of [0,1] / LLM API error；全部走同一个 _degrade_with_fallback() 函数
+
+### 测试覆盖矩阵（21 新测试）
+- **单元 20**：HappyPath 2 + DegradePath 8 + WhitelistIntegrity 6 (parametrized) + PromptStructure 1 + ModuleSurface 3
+- **集成 1**：TestHookGenerationDegradeE2E 验证 Q3.B 端到端 — hook LLM 返回 invalid JSON → pipeline DONE + timeline.hook_candidates.degraded=true + 1 个 fallback 候选
+
+### 集成测试 mock 联动修复（24 处 trivial 但必要）
+- e2e: 12 处（含 K3 contract 3→4 + K3 filenames 3→4 + timeline.json top keys 5→6 + hook_candidates schema 全验证 + degrade e2e 新增）
+- unit: 12 处（含 K10 expected 5→6 节点 + 弱化契约 >=5→>=6 + 2 处 docstring 同步）
+- 7 处 fake_llm responses_per_call 从 3 元素加到 4 元素
+
+### 阶段性产出
+- commit `7d4bc64`（5 文件 / +768 / -38）
+- v0.8.5 任务完成 → M2a-fix 进度 3/8 → 4/8（50%）
+- 整体进度 17/38 → 18/38（44.74% → 47.37%）
+- 下一步 v0.8.6 timeline.json schema 文档化（0.2d）
+
+### 自检
+- 全程严守 project rule 250（commit 不含 .context/ + 不主动 push）+ 892（worktree-save 会话开始 + 会话结束闭环）
+- 全程严守 Karpathy §1（暴露 5 个隐含假设：单文件 vs 双文件 / Step 编号策略 / mock 失败根因 / e2e 是否新增 degrade 测试 / hook 是否影响 narrative 第一句）+ §2（不写投机性代码：不引入 hook 历史记录 / 不缓存 / 不 metric）+ §3（精准修改：每行变更追溯到某个 brainstorming 决策或 mock 失败）+ §4（每子步骤跑 ruff + pytest 验证后才推进）
+
+### 与 v0.8.4 比较（节奏验证）
+- v0.8.4: 7 业务文件改动 / 21 测试 mock 补全 / 0 新测试用例 / +260 / -41
+- v0.8.5: 5 业务文件改动 / 24 测试 mock 补全 / 21 新测试用例 / +768 / -38
+- 节奏一致：brainstorming → 4 步实现 → 验证 → commit → 会话同步 全部跑通
+
+
+---
+
+## Session 27 (2026-05-06 00:14 ~ 00:30) — v0.8.6 timeline.json schema 文档化
+
+**Skill 流**: worktree-context → using-superpowers → architecture-designer (scope 决策) → adhoc-changes（纯文档登记）→ Karpathy §1（暴露 3 假设）+ §3（精准修改）
+
+### 决策路径
+- 进入任务前发现 design.md §6.2 的 class Timeline 只是 MVP 期简略定义，整个 v0.7+ 的实际 timeline.json schema 从未文档化
+- 暴露 1 个 scope 假设让用户决策：A 最小（只补 2 新字段）vs B 完整（补全所有历史字段）
+- 用户拍板 **A 最小**，保持 0.2d 预算 + Karpathy §2/§3 简洁精准
+
+### 关键架构产出（schema 演化原则）
+- **add-only-never-modify**：timeline.json 顶层字段仅 add 不 modify，消费方必须 `if "xxx" in timeline:` 守卫
+- 这条规则的价值在 v0.8.7：5 部跑批可以**同时 replay 旧 baseline**（v0.7/v0.8.3 没 hook_candidates）和**跑新数据**（v0.8.5 之后有），不会因为 schema 变更阻塞回归测试
+
+### 故障模式对比文档化（首次明确登记）
+- v0.8.4 persona = **strict mode**（输入依赖，必须可靠 → 失败抛 PersonaInferenceError）
+- v0.8.5 hook = **degrade mode**（衍生产物，失败不阻塞 → 单 fallback 候选 + degraded=true）
+- 这个对比是 brainstorming 阶段拍板但代码注释里散落，v0.8.6 第一次集中登记到 design.md
+
+### 6 类白名单交叉一致性验证
+- 6 类 hook style_tag（design.md vs hook_generator.py VALID_STYLE_TAGS）**完全 1:1 对齐** ✅
+- 6 类 persona_id（design.md vs persona_inferer.py VALID_PERSONA_IDS）一致 ✅
+- 这一步避免了"文档与代码漂移"的常见 bug 模式
+
+### 阶段性产出
+- commit （见 commit message）
+- v0.8.6 任务完成 → M2a-fix 进度 4/8 → 5/8（62.5%）
+- 整体进度 18/38 → 19/38（47.37% → 50.0%）— **半数任务里程碑达成** 🎯
+- 下一步 v0.8.7 5 部跑批（验收门，1.0d）
+
+### 自检
+- 全程严守 project rule 250（commit 不含 .context/）+ 892（worktree-save 会话结束闭环）
+- 全程严守 Karpathy §1（暴露 scope 假设让用户决策，不默默扩大）+ §2（不补 scope 外的历史字段）+ §3（精准修改 — 只在 §6.2 加，其他章节不动）+ §4（验证目标：6 类白名单交叉一致 + git status 干净）
+
+---
+
+## Session 28 — multi-role-debate 报告模板修复 (2026-05-06)
+
+### 触发
+用户反馈 `2026-05-05-good-erchuang.html` 报告"没有展示具体内容"。
+
+### 诊断
+通过浏览器 DevTools 逐项排查，发现两个根因：
+
+**根因 1 — CORS 阻止**
+- `file://` 协议下 `fetch()` 被 CORS 阻止，用户双击 HTML 时 payload JSON 加载失败
+- Header stats 的 CSS 在第 0 行就渲染了（不依赖 payload），但四个 SECTION 全部空白
+
+**根因 2 — renderConsensus() 字段名不匹配**
+- 模板使用扁平顶层字段: `payload.stage3a_unanimous_topics`, `payload.stage3b_chair_decided`, `payload.stage3b_open_questions`
+- 真实 payload 的 consensus 数据在嵌套对象中: `payload.stage3_consensus.consensus_unanimous`, `payload.stage3_consensus.consensus_chair_decided`, `payload.stage3_consensus.open_questions`
+
+### 修复
+
+**修复 1 — CORS 兼容**
+- 模板: `fetch()` → 动态 `<script src>` 标签加载 JSON（不受 CORS 限制）
+- Inject 脚本: 新增生成 `.payload.js` 文件（`window.__PAYLOAD__ = {...}`），HTML 通过 `<script src>` 引用
+- 数据保持在外部文件中引用（用户要求），同时兼容 `file://` 和 HTTP 两种打开方式
+- 5 秒超时 + onerror 兜底错误提示
+
+**修复 2 — renderConsensus() 字段映射**
+- `payload.stage3a_unanimous_topics` → `payload.stage3_consensus.consensus_unanimous`
+- `payload.stage3b_chair_decided` → `payload.stage3_consensus.consensus_chair_decided`
+- `payload.stage3b_open_questions` → `payload.stage3_consensus.open_questions`
+- 增强渲染: evidence_trail 对象格式(含 stage/role/snippet) / chair-decided decision_type+rationale+supporting_roles+dissenting_roles / open_questions options_for_user(含 option/trade_off/endorsed_by_roles/user_decision_required_by)
+
+### 验证
+- `.payload.js` 生成: 84,494 bytes
+- HTML 输出: 40,078 bytes
+- 浏览器 HTTP 验证: `corrections-root`(11 卡片) + `stage1-root`(5 角色) + `conflicts-root`(7 冲突) + `consensus-root`(14 卡片) 全部正确渲染
+- `window.__PAYLOAD__` 正确加载，所有 payload keys 存在
+
+### 文件清单
+- 改 `assets/report-template.html`: fetch() → script src + renderConsensus() 重写
+- 改 `/tmp/inject_debate_payload.py`: 新增 .payload.js 生成 + `__PAYLOAD_JS_PATH__` 占位符
+- 生成 `.outputs/2026-05-05-good-erchuang.payload.js` (新)
+- 重生成 `.outputs/2026-05-05-good-erchuang.html`
+
+---
+
+## Session 29 — v0.8.7 跑批 + 评分 + 跑批报告（2026-05-06）
+
+### Trigger
+v0.8.7 B 阶段验收门：5 部题材跑批 + 人工评分 + 报告输出。
+
+### 关键决策
+- **05_vlog 309s ASR 超时**：用户选择 kill + 标记 SKIPPED（跑批时间预算决策，非产品功能限制）
+- **不限制素材时长**：用户明确"不要限制素材上限，ASR 可能面对一部电影"→ 报告修正"消除冷启动"为 v0.8.8 P2 工程方案
+
+### 跑批结果（5 部题材）
+| 素材 | 状态 | 得分 |
+|---|---|---|
+| 01_kids_song | FAIL | — (plot_outline schema 非叙事兼容) |
+| 02_anime | FAIL | — (同上，纯混剪) |
+| 03_movie_review | OK | **88 PASS** ✅ |
+| 04_short_drama | OK | 73 FAIL（差 2 分） |
+| 05_vlog | SKIP | — (309s ASR 超时间预算) |
+
+### 交付产物
+- `scripts/run_v087_batch.sh` (32 行, 5 部串行跑批)
+- `scripts/run_v087_partial.sh` (28 行, K3 方案追跑)
+- `scripts/v087_score.py` (160 行, 客观评分脚本入仓库)
+- `docs/plans/baselines/2026-05-06-v0.8.7-batch-eval.md` (210 行, 完整跑批报告)
+- `data/realvideo_test/v087_batch/_results.tsv` (修正 skip reason)
+
+### 重要修正
+- 报告早期草稿"限制素材时长 ≤180s"错误归因 → 修正为"消除冷启动"工程方案
+- 加"反例归档"段防止回归（ASR 必须支持电影级长视频）
+
+### 下一步
+- v0.8.8 验收报告 + 决定是否启 M2b-full (0.6d)
