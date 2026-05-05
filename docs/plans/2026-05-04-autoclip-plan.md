@@ -34,31 +34,31 @@ docs/plans/
 | **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | ✅ 已完成 | 8/8 (M1.1-M1.8 ✅; 含 10 轮 self-check sealed via LIM#9 + LIM#8 FIXED in M2a-kickoff cleanup) |
 | **M1-e2e** — M1 milestone 人工 e2e 验收 | W1↔W2 衔接 | 1 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) §M1.8 验收标准 | ⚪ 已跳过（用户决策直接进 M2a） | 0.2d 人工任务（uvicorn + curl POST /api/jobs；M1 已 185 单元/集成测试覆盖足够） |
 | **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | ✅ 已完成（COMPLETE-but-style-deviation-found，触发 M2a-fix） | 6/6（commit eecab0f + e883433；Session 19 端到端真实视频验收通过；但 narrative_ir.text 风格根本性偏离 design.md §8.3.2 — 实现的是百度百科, 要的是 B 站 UP 主二创视角 → 触发 M2a-fix） |
-| **M2a-fix** — 二创风格修正 + M2b-light kickoff | W2↔W3 衔接 | 5 | [`tasks/M2a-fix-narrative-style.md`](./tasks/M2a-fix-narrative-style.md) | 🟡 brainstorming COMPLETE / 待启动 Day 0 | 0/5（总工时 6.6d；含 brainstorming Q1-Q8 + 8 角度 19 项 P0 修正 + v0.7.1 P0 补强；Session 20-21 收敛） |
-| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 1（M2b-light 已并入 M2a-fix.5；M2b-full 数据驱动决定） | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始（v0.7 拆分修订） | 0/1（M2b-full 工时 0d 或 4d，依赖 M2a-fix.5 评估结果决策） |
+| **M2a-fix v0.8** — 二创风格修正（B0+B1 渐进路径） | W2↔W3 衔接 | 8 | [`tasks/M2a-fix-narrative-style.md`](./tasks/M2a-fix-narrative-style.md) | 🟡 v0.8.1 ✅ 已完成 / v0.8.3-.8 待启动 | 1/8（总工时 3.4d；v0.7 6.6d 方案被 baseline 报告推翻 -3.2d，归档于 `_archived_2026-05-05_M2a-fix-v0.7.md`；详见 `baselines/2026-05-05-v0.8-baseline.md`）|
+| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 1（M2b-light 能力已被 v0.8 persona_inferer 替代；M2b-full 大概率跳过）| [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 大概率跳过（v0.8.7 跑批 ≥4/5 视频达 75 分则直接进 M3）| 0/1（v0.8 推翻 v0.7 的 M2b 拆分方案；M2b-light = 不做，M2b-full = 0d 或 4d 由 v0.8.8 决策）|
 | **M3** — Render + Web + 零知识架构 | W4 | 9 | [`tasks/M3-render-web-compliance.md`](./tasks/M3-render-web-compliance.md) | ⏳ 待开始 | 0/9 |
 | **M4** — E2E + 风格扩展 + 多片回归 | W5 | 5 | [`tasks/M4-e2e-validation.md`](./tasks/M4-e2e-validation.md) | ⏳ 待开始 | 0/5 |
 | Week 6 — Buffer | W6 | — | — | ⏳ 待开始 | — |
 
-**总任务数**：38 个 + buffer（M2a-fix 新增 5 个；M2b 原 5 个 → 1 个 M2b-full）
+**总任务数**：41 个 + buffer（M2a-fix v0.8 8 个 vs v0.7 5 个 +3；M2b 原 5 个 → 1 个 M2b-full 大概率跳过）
 
 ---
 
 ## 3. 路线图与里程碑依赖
 
 ```
-Week 1   Week 2-2.5    Week 2.5-3     Week 4         Week 5     Week 6 (buffer)
-├── M1 ─┼── M2a ──┬── M2a-fix ──┼── M2b? ──┼── M3 ────────┼── M4 ────┼─────────────┤
-基础设施   Scripting   二创风格修正    Scripting    Render+Web      E2E +     KPI 验收 +
-+Ingest    主链路      +M2b-light     鲁棒性?       +合规           风格扩展   关键修复
-+Index                                (only full)                  +自评分
-                                      可能整体跳过
+Week 1   Week 2-2.5     Week 2.5-3       Week 4         Week 5     Week 6 (buffer)
+├── M1 ─┼── M2a ──┬── M2a-fix v0.8 ──┬── M2b? ──┼── M3 ────────┼── M4 ────┼─────────────┤
+基础设施   Scripting   B0+B1 渐进 3.4d    大概率跳过   Render+Web      E2E +     KPI 验收 +
++Ingest    主链路      (人格驱动单 LLM)   (v0.8.7      +合规           风格扩展   关键修复
++Index                                    决策)                       +自评分
 
-(v0.7) M2a-fix 6.6d 插入 W2 末尾 → W3 初；M2b 仅保留 full 部分（0d 或 4d 数据驱动）
+(v0.8, 2026-05-05) M2a-fix 砍 -3.2d (6.6d → 3.4d)；M2b 触发条件 = v0.8.7 ≥4/5 视频不达 75 分
+依据：docs/plans/baselines/2026-05-05-v0.8-baseline.md
 ```
 
 **关键路径**（不可并行）：
-`M1.1 → M1.3 → M1.6 → M1.7 → M2a.1 → M2a.3 → M2a-fix.1 → M2a-fix.2 → M2a-fix.5 → (M2b-full?) → M3.4 → M4.1`
+`M1.1 → M1.3 → M1.6 → M1.7 → M2a.1 → M2a.3 → v0.8.3 (persona_inferer) → v0.8.4 (handler 集成) → v0.8.7 (5 部跑批) → (M2b-full?) → M3.4 → M4.1`
 
 **并行机会**：
 - M3.7（Web 模板）可与 M2a 并行 — 前端不依赖 Scripting
