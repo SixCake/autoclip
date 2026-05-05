@@ -61,6 +61,17 @@ VALID_PLOT_OUTLINE_JSON = json.dumps(
     ensure_ascii=False,
 )
 
+# v0.8.4: persona_inferer Stage1 LLM call inserted between plot_outline and narrative_ir.
+# Schema must match autoclip.algo.persona_inferer.PersonaInferenceResult (Q3=B full dump).
+VALID_PERSONA_JSON = json.dumps(
+    {
+        "persona_id": "toxic_middle_aged",
+        "confidence": 0.85,
+        "reasoning": "drama 题材 + 双角色冲突 + 转折结构 → 适合毒舌中年视角解读",
+    },
+    ensure_ascii=False,
+)
+
 VALID_NARRATIVE_IR_JSON = json.dumps(
     {
         "paragraphs": [
@@ -123,7 +134,7 @@ def _write_minimal_inputs(job_dir: Path) -> None:
 
 class TestK3CallbackChainE2E:
     def test_two_llm_calls_persist_to_llm_calls_directory(self, tmp_path, monkeypatch):
-        """K3: both plot_outline and narrative_ir LLM calls write to llm_calls/scripting_NNN.json."""
+        """K3: all 3 LLM calls (plot_outline + persona + narrative_ir) write to llm_calls/scripting_NNN.json."""
         job_dir = tmp_path / "job_k3"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
@@ -132,7 +143,7 @@ class TestK3CallbackChainE2E:
         # Trick: monkeypatch get_llm to return a FakeListChatModel BUT inject the recorder
         # passed via `callbacks` kwarg into the fake LLM's constructor (mimics ChatOpenAI).
         recorders_received: list[LlmCallsRecorder] = []
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -152,13 +163,15 @@ class TestK3CallbackChainE2E:
         run_scripting(job_dir)
 
         # Verify recorder was actually passed to LLM constructor (K3 contract)
-        assert len(recorders_received) == 2, (
-            f"K3 violation: expected 2 LlmCallsRecorder instances, got {len(recorders_received)}"
+        # v0.8.4: handler now makes 3 LLM calls (plot_outline + persona + narrative_ir)
+        assert len(recorders_received) == 3, (
+            f"K3 violation: expected 3 LlmCallsRecorder instances (plot_outline + persona + "
+            f"narrative_ir), got {len(recorders_received)}"
         )
-        # Both LLM constructions should receive the SAME recorder instance
-        # (handler creates one recorder, reuses for both LLM calls)
-        assert recorders_received[0] is recorders_received[1], (
-            "K3 violation: handler should reuse single recorder across both LLM calls"
+        # All 3 LLM constructions should receive the SAME recorder instance
+        # (handler creates one recorder, reuses across all LLM calls)
+        assert recorders_received[0] is recorders_received[1] is recorders_received[2], (
+            "K3 violation: handler should reuse single recorder across all 3 LLM calls"
         )
 
         # Verify files actually written
@@ -166,8 +179,10 @@ class TestK3CallbackChainE2E:
         assert llm_calls_dir.exists(), "K3 violation: llm_calls/ directory not created"
         files = sorted(llm_calls_dir.iterdir())
         filenames = [f.name for f in files]
-        assert filenames == ["scripting_001.json", "scripting_002.json"], (
-            f"K3 violation: expected scripting_001.json + scripting_002.json, got {filenames}"
+        # v0.8.4: 3 LLM calls → 3 persisted files
+        assert filenames == ["scripting_001.json", "scripting_002.json", "scripting_003.json"], (
+            f"K3 violation: expected scripting_001.json + _002 + _003 (plot_outline + persona + "
+            f"narrative_ir), got {filenames}"
         )
 
     def test_persisted_call_record_schema(self, tmp_path, monkeypatch):
@@ -176,7 +191,7 @@ class TestK3CallbackChainE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -215,7 +230,7 @@ class TestRealJSONRepairChain:
 
         # Note: TRAILING_COMMA on 1st attempt → repair fixes inside same get_llm call;
         # 2nd get_llm() returns narrative_ir LLM with valid response.
-        responses_per_call = [TRAILING_COMMA_PLOT_OUTLINE, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [TRAILING_COMMA_PLOT_OUTLINE, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -251,7 +266,7 @@ class TestTimelineJSONSchemaE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -270,7 +285,17 @@ class TestTimelineJSONSchemaE2E:
         )
 
         # --- top-level structure ---
-        assert set(timeline.keys()) == {"plot_outline", "narrative_ir", "binding_stats", "segments"}
+        # v0.8.4 Q3=B: timeline.json 顶层加 recommended_persona dict (full dataclass dump)
+        assert set(timeline.keys()) == {
+            "plot_outline", "recommended_persona", "narrative_ir", "binding_stats", "segments",
+        }
+
+        # --- recommended_persona schema (v0.8.4 Q3=B) ---
+        rp = timeline["recommended_persona"]
+        assert set(rp.keys()) == {"persona_id", "confidence", "reasoning"}
+        assert rp["persona_id"] == "toxic_middle_aged"  # matches VALID_PERSONA_JSON fixture
+        assert isinstance(rp["confidence"], float) and 0.0 <= rp["confidence"] <= 1.0
+        assert isinstance(rp["reasoning"], str) and len(rp["reasoning"]) > 0
 
         # --- plot_outline schema ---
         po = timeline["plot_outline"]
@@ -335,7 +360,7 @@ class TestTimelineJSONSchemaE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):

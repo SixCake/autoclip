@@ -60,6 +60,8 @@ def build_narrative_ir_messages(
     plot_outline_dict: dict[str, Any],
     asr_with_timestamps: str,
     target_duration_sec: float,
+    persona_id: str | None = None,
+    persona_reference_lines: list[str] | None = None,
 ) -> list:
     """Build SystemMessage + HumanMessage for narrative IR generation.
 
@@ -67,6 +69,11 @@ def build_narrative_ir_messages(
         plot_outline_dict: PlotOutline.to_dict() output (contains main_characters for role injection).
         asr_with_timestamps: ASR text with timestamps (will be truncated to 40k chars if longer).
         target_duration_sec: Target video duration in seconds (for sentence count estimation).
+        persona_id: Optional persona id from v0.8.3 inferer (e.g., "toxic_middle_aged"). If None,
+                    a generic placeholder block is used.
+        persona_reference_lines: Optional list of reference lines extracted from
+                    docs/personas/{persona_id}.md via persona_inferer.extract_reference_lines().
+                    If None or empty, a placeholder block is used.
 
     Returns:
         List of LangChain BaseMessage instances.
@@ -77,15 +84,36 @@ def build_narrative_ir_messages(
     # Estimate target sentence count
     target_sentences = int(target_duration_sec / 6)
 
+    # Build persona reference block (v0.8.4): inject 3-5 lines from docs/personas/{persona_id}.md
+    # If caller did not supply persona info, use a generic fallback (preserves prior behavior).
+    if persona_id and persona_reference_lines:
+        # Cap at 5 lines to control token cost; each line ≤200 chars (persona md authored).
+        capped_lines = persona_reference_lines[:5]
+        persona_reference_block = f"（推荐人格：{persona_id}）\n" + "\n".join(
+            f"- {line}" for line in capped_lines
+        )
+    else:
+        persona_reference_block = "（未指定人格，使用通用 B 站二创解说语气）"
+
     # Check if main_characters is empty (degrade path)
+    # Karpathy §3 fix: caller must explicitly format ALL placeholders in STYLE_DESCRIPTION
+    # (target_duration_sec / target_sentences / persona_reference_block). Previous version
+    # left {target_*} unreplaced, leaking literal "{target_duration_sec}" into the LLM prompt.
     main_characters = plot_outline_dict.get("main_characters", [])
     if not main_characters:
-        # Omit role-aware constraints when no characters available
-        style_desc = STYLE_DESCRIPTION.split("【角色称呼】")[0].strip()
+        # Omit role-aware constraints when no characters available; keep persona block intact
+        # (persona_reference_block sits BEFORE 【角色称呼】 in STYLE_DESCRIPTION, so split is safe).
+        style_desc_raw = STYLE_DESCRIPTION.split("【角色称呼】")[0].strip()
         role_clause = "\n\n【角色称呼】\n当前剧情大纲未提供角色信息，可使用通用指代如「他」「她」"
-        style_desc += role_clause
+        style_desc_raw += role_clause
     else:
-        style_desc = STYLE_DESCRIPTION
+        style_desc_raw = STYLE_DESCRIPTION
+
+    style_desc = style_desc_raw.format(
+        target_duration_sec=target_duration_sec,
+        target_sentences=target_sentences,
+        persona_reference_block=persona_reference_block,
+    )
 
     system_content = SYSTEM_PROMPT_TEMPLATE.format(
         style_description=style_desc,

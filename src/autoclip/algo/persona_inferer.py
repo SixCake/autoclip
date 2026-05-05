@@ -193,3 +193,45 @@ def load_persona_description(persona_name: str) -> str:
     if not persona_path.exists():
         raise FileNotFoundError(f"Persona file not found: {persona_path}")
     return persona_path.read_text(encoding="utf-8")
+
+
+# === v0.8.4 helpers (reference-line extraction for prompt injection) ===
+
+# Match the unified section header in all 6 persona md files:
+#   "## 真人 Reference 台词（5-10 条）"
+# Capture body until next "## " heading or EOF.
+_REFERENCE_SECTION_PATTERN = re.compile(
+    r"##\s*真人\s*Reference\s*台词[^\n]*\n([\s\S]*?)(?=\n##\s|\Z)",
+    re.MULTILINE,
+)
+
+# Match enumerated lines like:  1. "..."   2. "..."   3. "..."
+# Tolerates half-width " and full-width “ ” quotes.
+_REFERENCE_LINE_PATTERN = re.compile(
+    r'^\s*\d+\.\s*["“](.+?)["”]\s*$',
+    re.MULTILINE,
+)
+
+
+def extract_reference_lines(persona_md: str) -> list[str]:
+    """Extract enumerated 'Reference 台词' entries from a persona markdown file.
+
+    Used by v0.8.4 to inject persona-specific reference lines into the
+    narrative_ir prompt without dumping the full md (which would include
+    failure signals / offensive flags that would confuse the LLM).
+
+    Args:
+        persona_md: Full markdown content of one docs/personas/*.md file
+                    (typically obtained via load_persona_description()).
+
+    Returns:
+        List of reference line strings (quotes and numbering stripped).
+        Empty list if the section is missing or contains no enumerated entries
+        (caller should treat this as a load failure — see Karpathy §1: do not
+        silently degrade).
+    """
+    section_match = _REFERENCE_SECTION_PATTERN.search(persona_md)
+    if not section_match:
+        return []
+    body = section_match.group(1)
+    return [m.group(1).strip() for m in _REFERENCE_LINE_PATTERN.finditer(body)]

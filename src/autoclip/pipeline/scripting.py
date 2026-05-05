@@ -13,16 +13,17 @@ Responsibilities:
 5. Naive greedy binding (M2a.5 bind_naively).
 6. Serialize timeline.json.
 
-Progress milestones (K10 v0.6 — 4 收敛):
+Progress milestones (K10 v0.8.4 — 5 数值，加 persona):
 - 0.05  handler entry, files loaded
 - 0.30  plot_outline LLM call DONE (response + parsed)
+- 0.40  persona_inferer LLM call DONE (recommended persona + reference lines)
 - 0.65  narrative_ir LLM call DONE (response + parsed; JSON repair if any)
 - 0.95  binding DONE
 - 1.00  DONE (set automatically by mark_stage(DONE) at end)
 
 v0.6 修订: 进度从 8 数值收敛到 4 (删 START 拆分 + 删 0.65 dead milestone).
-原 8 数值在 90min 视频 Scripting ~2.5min 下平均节点 18s, START/DONE 拆分对前端体验
-几乎无差别. K10 契约弱化: progress 单调递增 + 至少含上述 4 个数值 + DONE=1.0.
+v0.8.4 修订: 加 persona inference Step 2.5 → 0.40 节点 (新增 1 个 LLM call ~3-5s).
+K10 契约弱化: progress 单调递增 + 至少含上述 5 个数值 + DONE=1.0.
 
 Contract with PipelineRunner (per runner.py `_stage_entrypoint`):
 - We do NOT wrap the body in try/except — entrypoint already catches and marks FAILED.
@@ -37,7 +38,7 @@ K-clause contracts (M2a brainstorming v0.5 落地):
        动态算 (calc_narrative_ir_max_tokens) 防 600s 档位 100% 失败
 - K8: plot_outline / narrative_ir final failure → raise *Error (NO graceful fallback)
 - K9: llm_calls/ written here; cleanup deferred to M3.6 (not this task)
-- K10 (v0.6 收敛): 4 progress milestones (0.05/0.30/0.65/0.95) 单调递增, 末次 DONE=1.0
+- K10 (v0.8.4): 5 progress milestones (0.05/0.30/0.40/0.65/0.95) 单调递增, 末次 DONE=1.0
 """
 
 from __future__ import annotations
@@ -50,6 +51,12 @@ from loguru import logger
 
 from autoclip.algo.greedy_binder import BindingResult, bind_naively
 from autoclip.algo.narrative_ir import NarrativeIR, PlotOutline
+from autoclip.algo.persona_inferer import (
+    PersonaInferenceResult,
+    extract_reference_lines,
+    infer_persona,
+    load_persona_description,
+)
 from autoclip.algo.shot_detector import Shot
 from autoclip.pipeline.runner import register_stage_handler
 from autoclip.pipeline.state import JobStateFile, Stage, StageStatus
@@ -331,6 +338,32 @@ def run_scripting(job_dir: Path) -> None:
         len(plot_outline.key_acts),
     )
 
+    # --- Step 2.5: persona inference (v0.8.4 — Stage1 LLM for persona recommendation) ---
+    # Q1=A (strict mode): PersonaInferenceError will propagate up — entrypoint marks SCRIPT FAILED.
+    # Q2: input is plot_outline (high-density structured signal), no raw ASR/keyframes.
+    # Q3=B: full dataclass dump goes into timeline.json recommended_persona field.
+    _check_cancel(state, "persona_inferer_llm")
+    logger.info("[scripting] persona_inferer LLM call START")
+    persona_llm = get_llm(
+        json_mode=True,
+        callbacks=[recorder],
+        temperature=0.3,
+        max_tokens=300,
+    )
+    persona_result: PersonaInferenceResult = infer_persona(plot_outline, llm_client=persona_llm)
+    # Q2 decision: load reference lines from docs/personas/{persona_id}.md (only the
+    # "真人 Reference 台词" section, not the full md, to control token cost & avoid
+    # leaking "失败信号"/"冒犯型人格" sections into prompt).
+    persona_md = load_persona_description(persona_result.persona_id)
+    persona_reference_lines = extract_reference_lines(persona_md)
+    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.40)
+    logger.info(
+        "[scripting] persona_inferer DONE: persona={!r} confidence={:.2f} n_reference_lines={}",
+        persona_result.persona_id,
+        persona_result.confidence,
+        len(persona_reference_lines),
+    )
+
     # --- Step 3: narrative_ir LLM call (v0.6: 删 0.30 START + max_tokens 动态算) ---
     _check_cancel(state, "narrative_ir_llm")
     # K7 输出闸门: max_tokens 按 target_sentences 动态算 (修复 600s 档位 100% 失败)
@@ -348,7 +381,11 @@ def run_scripting(job_dir: Path) -> None:
         max_tokens=ir_max_tokens,
     )
     ir_messages = build_narrative_ir_messages(
-        plot_outline.to_dict(), timestamped_text, float(target_duration_sec)
+        plot_outline.to_dict(),
+        timestamped_text,
+        float(target_duration_sec),
+        persona_id=persona_result.persona_id,
+        persona_reference_lines=persona_reference_lines,
     )
     narrative_ir: NarrativeIR = _invoke_llm_with_repair(
         ir_llm,
@@ -386,6 +423,13 @@ def run_scripting(job_dir: Path) -> None:
     total_chars = sum(len(seg.sentence_text) for seg in binding_result.segments) or 1
     timeline_payload = {
         "plot_outline": plot_outline.to_dict(),
+        # v0.8.4 Q3=B: 完整 dataclass dump (persona_id + confidence + reasoning) for v0.8.7
+        # 跑批人工 review 时可定位"为什么选了这个 persona"。v0.8.6 schema 扩展直接复用此字段。
+        "recommended_persona": {
+            "persona_id": persona_result.persona_id,
+            "confidence": persona_result.confidence,
+            "reasoning": persona_result.reasoning,
+        },
         "narrative_ir": narrative_ir.to_dict(),
         "binding_stats": {
             "total_segments": binding_result.total_count,
@@ -414,7 +458,7 @@ def run_scripting(job_dir: Path) -> None:
     logger.info("[scripting] timeline.json written: n_segments={}",
                 len(timeline_payload["segments"]))
 
-    # --- Step 6: mark DONE (progress=1.0 set automatically; v0.6: 仅 4 个 RUNNING 数值 0.05/0.30/0.65/0.95) ---
+    # --- Step 6: mark DONE (progress=1.0 set automatically; v0.8.4: 5 个 RUNNING 数值 0.05/0.30/0.40/0.65/0.95) ---
     state.mark_stage(Stage.SCRIPT, StageStatus.DONE)
     logger.info("[scripting] DONE job_dir={}", job_dir)
 

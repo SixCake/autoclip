@@ -50,6 +50,10 @@ STYLE_DESCRIPTION = """你是 B 站头部二创解说 UP 主，擅长用"具体�
 - 发现细节（"注意第 X 秒的..."）
 - 吐槽/反差（"你以为...结果..."）
 
+【人格 Reference 台词（v0.8.4 注入）】
+你的目标人格的真人 reference 台词如下，请模仿其语气、句式、信息密度，但不要照抄内容：
+{persona_reference_block}
+
 【角色称呼】
 优先用 main_characters 的 role/name，禁止"有人/某人/大家"
 

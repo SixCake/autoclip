@@ -152,3 +152,65 @@ class TestWhitelistIntegrity:
     def test_whitelist_is_frozen(self) -> None:
         """frozenset → 调用方不能误改。"""
         assert isinstance(VALID_PERSONA_IDS, frozenset)
+
+
+# === v0.8.4 extract_reference_lines tests ===
+
+
+from autoclip.algo.persona_inferer import extract_reference_lines  # noqa: E402
+
+
+class TestExtractReferenceLines:
+    def test_extracts_lines_from_real_persona_md(self) -> None:
+        """对真实 docs/personas/toxic_middle_aged.md 必须提取出 5+ 条台词。"""
+        md = load_persona_description("toxic_middle_aged")
+        lines = extract_reference_lines(md)
+        assert len(lines) >= 5, f"应至少 5 条 Reference 台词，实际 {len(lines)}"
+        # Karpathy §1 暴露假设: 提取出的台词不能含序号前缀和首尾引号
+        for line in lines:
+            assert not line.startswith('"'), f"首字符应为引号已 strip: {line!r}"
+            assert not line[0].isdigit() or "." not in line[:3], f"序号前缀未 strip: {line!r}"
+
+    @pytest.mark.parametrize("persona_id", sorted(VALID_PERSONA_IDS))
+    def test_all_6_personas_yield_non_empty_lines(self, persona_id: str) -> None:
+        """6 个 persona 必须全部能提取出非空 Reference 台词列表（防 v0.8.4 注入失败）。"""
+        md = load_persona_description(persona_id)
+        lines = extract_reference_lines(md)
+        assert len(lines) >= 5, (
+            f"persona {persona_id} 提取出 {len(lines)} 条 Reference 台词，应 ≥5；"
+            f"段标题正则可能与该文件不匹配，需排查"
+        )
+
+    def test_missing_section_returns_empty(self) -> None:
+        """段缺失 → 返回 []（Karpathy §1: 不静默降级，由 caller 抛错）。"""
+        md = "# 测试人格\n\n## 人格描述\n这里没有 Reference 段。\n\n## 失败信号\n- xxx"
+        assert extract_reference_lines(md) == []
+
+    def test_full_width_quotes_supported(self) -> None:
+        """兼容全角“”引号（防 markdown 编辑器自动替换造成漏抓）。"""
+        md = (
+            "## 真人 Reference 台词（5-10 条）\n"
+            "1. “这是全角引号台词。”\n"
+            "2. \"这是半角引号台词。\"\n"
+            "3. “混合段也要抓到。”\n"
+            "\n"
+            "## 失败信号\n- xxx\n"
+        )
+        lines = extract_reference_lines(md)
+        assert lines == [
+            "这是全角引号台词。",
+            "这是半角引号台词。",
+            "混合段也要抓到。",
+        ]
+
+    def test_does_not_eat_next_section(self) -> None:
+        """lookahead 必须正确停在下一个 ## 段，不吞 '失败信号' 内容。"""
+        md = (
+            "## 真人 Reference 台词（5-10 条）\n"
+            '1. "只抓这一条。"\n'
+            "\n"
+            "## 失败信号\n"
+            '1. "这条不应该被抓到。"\n'
+        )
+        lines = extract_reference_lines(md)
+        assert lines == ["只抓这一条。"], f"吞了下一段内容: {lines}"
