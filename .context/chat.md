@@ -833,3 +833,70 @@ M2a.5 简化版绑定算法（预估 0.8d）：按 `paragraph_hint` 时间区间
 
 ### 下一步
 M2a.6 Scripting Stage handler — 把 M2a.1-M2a.5 全部串接成 PipelineRunner 可调度的 stage handler (预估 1.5d): 8 milestone 进度上报 / K7 entry check (token 预估 > 32k 抛 NarrativeIRTooLargeError) / K8 LLM 失败 stage→FAILED / K9 cleanup llm_calls/ / state.json 直读 target_duration_sec + style_preset (Q5=A+C 决策).
+
+
+---
+
+## Session 17 (2026-05-05) — M2a.6 Scripting Stage handler 集成完成 (M2a 阶段 6/6 全部完成)
+
+### 触发
+用户输入 "继续" 后进入 M2a.6 (M2a 阶段最后一个子任务). 按 project_rules 892.md 第二阶段强制流程, 先并行收集所有依赖信息再实施 — 这次依赖面比 M2a.4/M2a.5 大很多 (集成任务): 任务规格 (line 309-400) + handler contract + 4 个上游模块的 schema + LangChain FakeListChatModel 路径 + Pydantic _PlotOutlineRaw 约束.
+
+### 实施过程 (7 个 todo, 一次性全部串通)
+1. **m2a6-1 依赖收集**: 5 轮并行查询, 锁定关键事实
+   - FakeListChatModel 路径: `langchain_core.language_models.fake_chat_models` (而非 langchain_community)
+   - FakeListChatModel.invoke 返回 AIMessage, .content 是 str (验证不会变 dict)
+   - _PlotOutlineRaw.key_acts: min_length=3, max_length=5 (这导致测试 fixture 第一版只放 1 个 act 失败)
+   - _JobMeta 已含 target_duration_sec + style_preset (M1.4 已实现, 不用改 schema — 与 plan-4-rollback 决策一致)
+2. **m2a6-2 tokens.py + test_tokens.py** (16/16 passed): 中文 1/2.5 + ASCII 1/4 ceil 保守; 1 处小 bug — `if not text: return 0` 在 isinstance 之前导致 None 走 falsy 路径跳过 TypeError; 修复: 顺序对调
+3. **m2a6-3 scripting.py 410 行**: 一次性生成 4 errors + 7 helpers + `_invoke_llm_with_repair` + 7 步 `run_scripting` 主流程; import OK 后跑测试发现 2 处 bug
+4. **m2a6-4 runner.py +1 行**: `_STAGE_MODULES` 取消注释 scripting → `_STAGE_HANDLERS=['index','ingest','script']`
+5. **m2a6-5 test_scripting_handler_progress.py 10 用例**: 第一轮 0/10 → backoff_factor 修复 → 9/10 → re-serialize repaired dict 修复 + fixture key_acts 1→3 → 10/10 ✅
+6. **m2a6-6 test_scripting_e2e.py 5 用例**: 第一轮 3/5 → fake_get_llm 闭包游标修复 (4 处 file_replace 一次提交) → 5/5 ✅
+7. **m2a6-7 全套 pytest 296 + 8 + git commit + worktree-save**
+
+### 实施过程中的 4 个 bug 修复
+**Bug 1 (m2a6-3)**: `retry_with_repair(backoff=2.0)` — 用错参数名
+- 真实签名是 `backoff_factor=2.0` (read_file utils/retry.py:26-30 确认)
+- 修复: `backoff` → `backoff_factor`
+
+**Bug 2 (m2a6-5 第二轮)**: `_invoke_llm_with_repair` 把 dict 直传 parse_fn
+- `try_repair_json(raw)` 返回 parsed JSON value (dict/list); 但 `parse_plot_outline_response` / `parse_narrative_ir_response` 都期望 raw str 入参
+- 一旦 1st parse 失败触发 repair, 第 2 次 parse 立即报 `TypeError: expected string or bytes-like object, got 'dict'`
+- 修复: `parse_fn(json.dumps(repaired_obj, ensure_ascii=False))` 重新序列化
+
+**Bug 3 (m2a6-5 第二轮)**: 测试 fixture VALID_PLOT_OUTLINE_JSON 只放 1 个 key_act
+- 违反 `_PlotOutlineRaw.key_acts: Field(..., min_length=3, max_length=5)` 约束
+- Pydantic 校验立即失败 → ValueError → retry 走 repair 路径 → repair 后又 raise → 终态 PlotOutlineError
+- 修复: fixture 加满 3 个 acts (Setup / Conflict / Resolution), 时长各 10s
+
+**Bug 4 (m2a6-6 第三轮 - 最隐晦)**: 集成测试 fake_get_llm 第一版导致 narrative_ir 永远失败
+- 第一版 `def fake_get_llm(): return FakeListChatModel(responses=[plot_outline, narrative_ir])` 每次调用都新建 LLM
+- handler 内 `plot_llm = get_llm(...)` 和 `ir_llm = get_llm(...)` 是两次独立调用, 每个新 LLM 的内部游标都从 `responses[0]` 开始
+- 结果: plot_llm.invoke() 拿 plot_outline JSON ✅; ir_llm.invoke() 也拿 plot_outline JSON ❌ → `parse_narrative_ir_response` 静默返回空 paragraphs (因为 plot_outline JSON 没有 paragraphs 字段, `data.get("paragraphs", [])` 返回 [])
+- 诊断方法: 用 SPY 函数拦截 `parse_narrative_ir_response` 的入参 raw, 看到前 200 字符是 `"title_guess"...` 立刻确认 — 不是 binder bug, 是 fake LLM 配置 bug
+- 修复: 闭包 `call_idx = [0]` 游标, 每次 `get_llm` 调用按次序返回只含**单个** response 的 FakeListChatModel
+
+### Commit
+- `✨feat : M2a.6 implementation — Scripting stage handler 串联 LLM + 绑定 + Timeline (31/31 new tests passed; full pytest 296+8s)` → commit `c6a3cd5`
+- 6 files changed, 1318 insertions(+), 1 deletion(-)
+- 测试: M2a.6 isolated 31/31 + 全套 pytest 296 passed + 8 skipped in 10.68s
+
+### M2a 阶段总结
+6 个子任务全部完成, 总计:
+- 新文件: 11 个 (factory.py / callback.py / plot_outline prompt+algo / narrative_ir prompt+algo / json_repair.py / retry.py / greedy_binder.py / tokens.py / scripting.py)
+- 修改文件: 4 个 (models/timeline.py BindingMethod / runner.py _STAGE_MODULES / pipeline/__init__.py / pyproject.toml)
+- 新增测试: 111 个 (M2a.1: 9 / M2a.2: 9 / M2a.3: 7 / M2a.4: 35 / M2a.5: 20 / M2a.6: 31)
+- 总 pytest: 296 passed + 8 skipped in 10.68s
+
+### 元教训
+**集成测试的 fake mock 必须复刻真实接口的"调用语义"而非"接口签名"**: Bug 4 的根本原因是我对 LangChain BaseChatModel 的 "responses 列表" 行为理解错了 — FakeListChatModel 的 responses 列表是**每个 LLM 实例自带的内部游标**, 不是 process-global 共享; handler 调 `get_llm()` 两次就是两个独立 LLM. 我以为 "responses=[plot, ir]" 会自动按调用顺序返回, 实际是每个 LLM 各自从 [0] 开始. 真实 ChatOpenAI 的语义是"每次 invoke 真实 HTTP 调用"; fake LLM 的"每次 invoke 取 responses[cursor++]"看似相似, 但当 handler 创建多个 LLM 实例时语义完全不同. 诊断方法: 写测试遇到诡异空数据时, 先用 spy 函数拦截上游入参 — 如果入参就错了, 就不是被测对象的 bug, 是 mock 配置 bug.
+
+**TDD fail-first 比预想时省时间**: 我按 user_rules 第 5 条策略一次性生成 ~300 行测试文件, 跑出 1/10 → 9/10 → 10/10 的渐进收敛过程. 如果先生成实现再"觉得对就提交", 上述 4 个 bug 至少有 2 个会跑到真实视频验收阶段才被发现 (debug 成本至少 10 倍). M2a.6 的 4 个 bug 全部在 unit test / integration test 阶段被钉死, 实际节省时间.
+
+### 下一步
+M2a 阶段技术验收已全部完成 (296/8 pytest 全绿). 剩两个选项:
+1. **端到端真实视频验收 (B2=B 决策剩余手动部分)**: 5min 短片跑 ingest+index+scripting 全链路, 肉眼检查 timeline.json 合理度 ≥ 50%, DeepSeek 主路径 + dashscope 兜底各跑一次. 需用户提供测试视频路径 + 已设置 DEEPSEEK_API_KEY (用户在 .env 已配, M2a.1 验证过).
+2. **直接进 M2b**: 高级绑定算法 (BM25 反向检索 / evidence-based binding / post-validation / multi-style preset). M2a baseline 已能跑通端到端, 但 binding 质量未验证. 如果直接进 M2b, 后续 KPI K3 (fallback_ratio < 0.3) 才有真实数据评估.
+
+建议方案: 先做端到端真实视频验收 (1-2h, 验证 M2a 整体可用性), 再启动 M2b brainstorming. 如果用户希望快速推进可直接进 M2b, M2a 验收推迟到 M3 web UI 可视化时一并做.

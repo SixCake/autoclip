@@ -38,6 +38,90 @@ User asked 3 times during batch-1 execution "请检查当前编辑的文件里�
 M2a.1 implementation phase: install LangChain dependencies + write factory.py + callback.py + unit tests + dual-provider smoke test. Estimated 1.0d.
 
 ---
+## 2026-05-05 (Session 17: M2a.6 Scripting Stage handler 集成完成 — M2a 阶段全部 6 子任务收官)
+
+### Trigger
+User input "继续" after M2a.5 (commit b145ac3) closing, entering M2a.6 implementation phase.
+按 project_rules 892.md 第二阶段流程, 先并行收集所有 M2a.6 依赖信息: M2a.6 完整任务规格 (line 309-400) + StageHandler contract + Stage.SCRIPT enum + _JobMeta schema (M1.4 已实现 target_duration_sec/style_preset) + ingest/index handler 模式 + shots/asr.json schema + LlmCallsRecorder/get_llm/prompt 入口签名 + FakeListChatModel 在 langchain_core.language_models.fake_chat_models 路径.
+
+### Implementation
+1. **m2a6-1 依赖收集**: 5 轮并行查询锁定 prompt 入口签名 + LLM 工厂返回类型 + FakeListChatModel 行为 (str content) + Pydantic _PlotOutlineRaw schema 约束 (key_acts: min_length=3, max_length=5)
+2. **m2a6-2 utils/tokens.py + tests/unit/test_tokens.py** (16/16 passed)
+   - `estimate_tokens(text)` 中文 1/2.5 + ASCII 1/4 ceil 保守, 永不 under-report
+   - 用整数算式 `(cjk_count * 10 + 24) // 25` 避 float 误差
+   - 1 处 bug 修复: 第 1 版 `if not text: return 0` 在 type check 前会让 None 命中 falsy 跳过 TypeError; 修复: 把 isinstance check 前置
+3. **m2a6-3 pipeline/scripting.py** (213 行 + 注释总 410 行; 1 import 校验通过)
+   - 4 errors: ScriptingError / ScriptingCancelledError / NarrativeIRTooLargeError / PlotOutlineError / NarrativeIRError
+   - 5 helpers: `_check_cancel` / `_load_shots` / `_load_asr` / `_build_full_text` / `_build_timestamped_text` / `_video_duration_sec` / `_atomic_write_json`
+   - **`_invoke_llm_with_repair(llm, messages, parse_fn, error_cls, label)`** — 用 M2a.4 `retry_with_repair(max_attempts=3, initial_delay=1.0, max_delay=8.0, backoff_factor=2.0)` 装饰内部 `_attempt()` 函数; parse 失败 → `try_repair_json` 修复 → re-parse; 仍失败 → re-raise ValueError 让 retry 重试; 终态失败 wrap 成 `error_cls` (PlotOutlineError / NarrativeIRError)
+   - **`run_scripting(job_dir)` 7 步主流程**:
+     1. load shots.json + asr.json + state.json (从 _JobMeta 读 target_duration_sec / style_preset) → progress 0.05
+     2. K7 entry check: estimate_tokens(timestamped_text) > 32000 raise NarrativeIRTooLargeError → progress (none, 在 0.05 后)
+     3. plot_outline LLM call START (progress 0.10) → DONE (progress 0.25), get_llm(json_mode=True, callbacks=[recorder], temperature=0.3, max_tokens=2000)
+     4. narrative_ir LLM call START (progress 0.30) → DONE (progress 0.60), get_llm(json_mode=True, callbacks=[recorder], temperature=0.7, max_tokens=8000)
+     5. JSON repair chain milestone (progress 0.65, 无论是否触发都打)
+     6. greedy binding START (progress 0.80) → DONE (progress 0.95)
+     7. timeline.json 序列化 + mark_stage(SCRIPT, DONE) (progress 1.0)
+   - K3 设计纪律: **handler 创建 1 个 LlmCallsRecorder 实例, 跨两次 get_llm 调用复用** — 这是后续测试 K3 契约验证的关键
+   - **2 处 bug 修复**:
+     - Bug 1: `retry_with_repair(backoff=2.0)` 用错参数名 → 真实签名是 `backoff_factor=2.0` (read_file 确认 retry.py:26-30)
+     - Bug 2: `_invoke_llm_with_repair` 把 `try_repair_json(raw)` 返回的 dict 直传 `parse_fn(repaired)`, 但 parse_fn 期望 str → `TypeError: expected string or bytes-like object, got 'dict'`; 修复: `parse_fn(json.dumps(repaired_obj, ensure_ascii=False))`
+4. **m2a6-4 pipeline/runner.py** (+1 行)
+   - `_STAGE_MODULES` tuple 取消注释 `"autoclip.pipeline.scripting"` (line 105)
+   - 验证: `_load_stage_modules()` 后 `_STAGE_HANDLERS` keys = `['index', 'ingest', 'script']`
+5. **m2a6-5 tests/unit/test_scripting_handler_progress.py** (10/10 passed, 305 行)
+   - **TestK10ProgressOrder (3)**: `test_8_milestones_in_strict_order` 用 `_MarkStageRecorder` wrap 真实 `mark_stage` 捕获所有 (stage, status, progress) 调用, 断言序列严格等于 `[("running",0.05),("running",0.10),("running",0.25),...,("done",None)]`; monotonic 不回退; 最终 progress=1.0
+   - **TestK7TokenBudget (1)**: 1000 sentences × 100 中文字 ≈ 40k tokens > 32000 → raise NarrativeIRTooLargeError, **K7 必须在任何 get_llm 之前抛** (用 `lambda: pytest.fail()` 验证 LLM 不被调)
+   - **TestK8HardFailure (2)**: plot_outline 返回 `"not json at all"` × 3 → PlotOutlineError; plot_outline OK + narrative_ir × 3 garbage → NarrativeIRError; monkeypatch `time.sleep` 加速 retry 到秒级
+   - **TestCancelCheckpoint (1)**: `JobStateFile.request_cancel()` 后 run_scripting → ScriptingCancelledError, LLM 不被调
+   - **TestTimelineSchema (3)**: top-level keys / segments 全部 `binding_method=hint_uniform` / M2a baseline `fallback_count=0`
+6. **m2a6-6 tests/integration/test_scripting_e2e.py** (5/5 passed, 248 行)
+   - **TestK3CallbackChainE2E (2)**: 真实 LlmCallsRecorder 注入 FakeListChatModel.callbacks → `llm_calls/scripting_001.json` + `scripting_002.json` 真实落盘 (验证 K3); 同一 recorder 实例跨两次 get_llm 调用; persisted record schema 完整 (seq/stage/model/messages/response/usage/started_at/ended_at/duration_sec)
+   - **TestRealJSONRepairChain (1)**: 1st response trailing comma → try_repair_json 修复 → 2nd attempt 不进 retry terminal → state DONE
+   - **TestTimelineJSONSchemaE2E (2)**: 完整 nested schema (plot_outline.main_characters/key_acts + narrative_ir.paragraphs.sentences + binding_stats + segments expected_keys); segments order_idx 严格按 NarrativeIR.iter_sentences() 顺序 = [(1,1),(1,2),(2,3)]
+   - **关键 bug 修复**: `fake_get_llm` 第 1 版 `return FakeListChatModel(responses=[plot, ir])` 每次新建 LLM, 两次 invoke 都拿 plot_outline → narrative_ir 失败回填空 paragraphs; 修复: 闭包 `call_idx = [0]; responses_per_call = [plot, ir]; def fake_get_llm(): return FakeListChatModel(responses=[responses_per_call[call_idx[0]]]); call_idx[0] += 1` — 按 get_llm 调用次序返回单 response 的 LLM
+
+### Commit
+- `✨feat : M2a.6 implementation — Scripting stage handler 串联 LLM + 绑定 + Timeline (31/31 new tests passed; full pytest 296+8s)` → commit `c6a3cd5`
+- 6 files changed, 1318 insertions(+), 1 deletion(-)
+- 新文件: utils/tokens.py / pipeline/scripting.py / tests/unit/test_tokens.py / tests/unit/test_scripting_handler_progress.py / tests/integration/test_scripting_e2e.py
+- 修改文件: pipeline/runner.py (_STAGE_MODULES +1 行)
+
+### Test Status
+- M2a.6 isolated: tokens 16/16 + scripting unit 10/10 + scripting integration 5/5 = **31/31 passed**
+- Full suite: **296 passed + 8 skipped in 10.68s** (265 + 31 new)
+
+### M2a 阶段全部完成 (6/6 子任务)
+| 任务 | 状态 | Commit | 测试 |
+|------|------|--------|------|
+| M2a.1 LangChain factory + callback | ✅ | a35e646 | 9/9 |
+| M2a.2 Plot Outline prompt + parser | ✅ | f71d174 | 9/9 |
+| M2a.3 Narrative IR data model + prompt | ✅ | 19bebfd | 7/7 |
+| M2a.4 JSON repair + retry decorator | ✅ | 42cb37f | 35/35 |
+| M2a.5 Naive greedy binder | ✅ | a7f8cb5 | 20/20 |
+| **M2a.6 Scripting handler 集成** | ✅ | **c6a3cd5** | **31/31** |
+
+总计 M2a 新增测试 111 个, 全套 pytest 296 passed + 8 skipped.
+
+### Decision Notes
+- Per **K3 契约**: handler 创建 1 个 LlmCallsRecorder 实例 (`recorder = LlmCallsRecorder(job_dir, stage="scripting")`), 复用给两次 get_llm 调用 — seq counter 内部累加 → scripting_001.json (plot_outline) + scripting_002.json (narrative_ir), 文件名顺序天然反映调用顺序
+- Per **K8 硬失败设计**: plot_outline / narrative_ir 终态失败都 raise *Error 不降级, entrypoint catch 后 mark FAILED — 故意不引入"降级 outline" (Q6=A 决策, 避免低质量 outline 污染下游)
+- Per **K9 cleanup 暂留 M3.6**: handler 只负责写 llm_calls/, 不在 SCRIPT stage 末尾删 — 因为 M3.6 final assembly 阶段做 audit/调试时还要看 LLM 调用记录; M3.6 cleanup 阶段统一 `shutil.rmtree(job_dir/'llm_calls')` 与 audio.wav 同批 (与 K9 zero-knowledge 设计一致)
+- Per **K10 8 milestones 决策**: 不复用 M1 ingest/index 的 4-5 milestone 简化版, 因为 M2a.6 涉及 2 次 LLM 长 IO (DeepSeek 平均 8-15s/call), 用户体感"看着进度跳"的需求强烈; 把每个 LLM 阶段拆 START + DONE (0.10/0.25 + 0.30/0.60) 给前端进度条平滑过渡
+- **M2a baseline fallback_count=0 不变**: M2a.5 binder 只有 HINT_UNIFORM 一种策略, 没有"先尝试再降级"; M2b post-validation 才会有真正的 fallback 计数 — timeline.json `binding_stats.fallback_count` 在 M2a 阶段始终 0
+
+### Next
+**端到端真实视频验收** (B2=B 决策的剩余手动部分):
+1. 5min 短片完整流水线: `ingest → index → scripting`, 检查 timeline.json 合理度 (匹配 ≥ 50%)
+2. DeepSeek 主路径 + dashscope 兜底路径各跑一次 (B2=B 验收)
+3. 创建 `scripts/test_scripting_realvideo.sh` (类似 M1 的 test_whisper_realvideo.sh), 接受 video path + AUTOCLIP_LLM_PROVIDER 环境变量
+
+**或直接进 M2b** (高级绑定算法):
+- M2b.1 BM25 关键词反向检索 (rank_bm25, 1.2d)
+- M2b.2 Evidence-based binding 替换 hint_uniform → evidence/evidence_lowconfidence
+- M2b.3 Post-validation + fallback_uniform 真正使用
+- M2b.4 PostValidationError + KPI K3 fallback_ratio 阈值告警
+- M2b.5 Multi style_preset 支持 (commentary / podcast / etc) — 这才需要真正用到 _JobMeta.style_preset 字段 (M2a 只读不分支)
 ## 2026-05-05 (Session 16: M2a.5 naive greedy binder implementation)
 
 ### Trigger
