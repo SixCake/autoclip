@@ -87,8 +87,28 @@
 
 - **目标**：把当前的"输出 persona + hook_candidates ≥3 + paragraph_skeleton"复杂结构砍成"仅输出 persona_id"
 - **理由**：钩子候选改由主 LLM call 输出（v0.8.5），骨架在 v0.7 时代验证已无价值
-- **验收**：函数返回签名 `infer_persona(asr_text, kf_desc) -> str`（直接返回 persona_id）
-- **保留接口**：返回 dataclass 含 `persona_id` + `reasoning`（50 字解释，可观测）
+
+#### Brainstorming 决议（2026-05-05 Session 24）
+
+| Q | 决议 | 实现影响 |
+|---|---|---|
+| **Q1 scope** | B = 职责分离 | 砍 hook_candidates + paragraph_skeleton；钩子由 v0.8.5 主 LLM call 输出。文件 173→~80 行 |
+| **Q2 输入** | B = 仅 plot_outline | 签名改为 `infer_persona(plot_outline: PlotOutline, llm_client) -> PersonaInferenceResult`（不再吃裸 ASR + keyframe） |
+| **Q3 fallback** | A = 严格抛异常 | 自定义 `PersonaInferenceError`；JSON 非法 / persona 不在白名单 / API 失败 → 立即抛；scripting handler 上层 catch 决定是降级还是中断（v0.8.4 brainstorming 决） |
+
+#### 实现要点
+
+- **新签名**：`infer_persona(plot_outline: PlotOutline, llm_client: BaseChatModel | None = None) -> PersonaInferenceResult`
+- **返回**：`PersonaInferenceResult(persona_id: str, confidence: float, reasoning: str)` — 仅 3 字段
+- **白名单校验**：persona_id 必须在 `VALID_PERSONA_IDS = {toxic_middle_aged, healing_big_sister, archaeologist, rage_brother, empathy_senior, sarcastic_gen_z}`，否则抛 `PersonaInferenceError`
+- **顺手修 BUG**：原文件 `from autoclip.llm import get_default_client` 路径错误 → 改为 `from autoclip.providers.llm import get_llm`
+- **保留**：`load_persona_description(persona_name)` 函数原样保留（v0.8.4 注入 reference 台词时要用）
+
+#### 验收
+
+- 文件行数 ≤ 100（实际 ~80）
+- `ruff check src/autoclip/algo/persona_inferer.py` 0 errors
+- `tests/unit/test_persona_inferer.py` ≥ 6 passed（含 happy path / 白名单校验 / JSON 非法 / API 失败 / load_persona_description / 严格抛异常验证）
 
 ### v0.8.4 scripting handler 集成
 
