@@ -3,6 +3,32 @@
 > **隶属于**: [`../2026-05-04-autoclip-plan.md`](../2026-05-04-autoclip-plan.md)
 > **设计依据**: [`../2026-05-04-autoclip-design.md`](../2026-05-04-autoclip-design.md) §16.3（核心算法升级） / §17.1 / §18.2
 
+---
+
+## ⚠️ v0.7 修订提示（2026-05-05, Session 20 brainstorming Q6=E 决议）
+
+**M2b 已被拆分**，本文件原始范围（5 任务 / 6.2d）按以下方式重新分配：
+
+| 原 M2b 范围 | v0.7 后归属 | 说明 |
+|---|---|---|
+| **M2b-light**（narrative_intent 字段路由 binder + KPI 框架 + 3-5 部评估） | ✅ **已并入 [M2a-fix.5](./M2a-fix-narrative-style.md)** | 2.1d，与 M2a 二创风格修正合并交付 |
+| **M2b-full**（BM25 反向检索 + time_resolver + bind_with_evidence + post-validation + Prompt v2） | ⏳ **保留在本文件**（M2b.1-M2b.5），但改为**条件启动** | 4d；仅当 M2a-fix.5 末尾决策报告建议启动时执行；否则整个 M2b 跳过 |
+
+**判定路径**:
+```
+M2a-fix.5 末尾决策报告
+    ├── 建议启动 M2b-full → 执行本文件 M2b.1-M2b.5（4d 实施）
+    └── 建议不启动      → 跳过本文件，直接进 M3
+```
+
+**启动条件**（design.md §17.5 显式定义，待 M2a-fix.1 落地）:
+- ✅ 启动: K1 < 50% **且** 业务方明确要求精确绑定（如 M3 Render 阶段反馈"画面对不上严重影响产品"）
+- ❌ 不启动: K1 ≥ 50% **或** narrative_intent 路由（M2a-fix.5 已实现）已能覆盖 80%+ 用例
+
+**v0.7 修订后本文件状态**: 5 任务定义保留作为 M2b-full 实施时的技术参考，但**进度计数归 0/1**（plan.md 主控视角下 M2b 整体仅算 1 个待决策任务）；M2b.1 BM25 / M2b.2 time_resolver / M2b.3 bind_with_evidence / M2b.4 Prompt v2 evidence_keywords 加回 / M2b.5 KPI 评估，5 项内容描述本身**不变**，仅启动时机改为条件触发。
+
+---
+
 ## 🎯 Milestone 目标
 将 M2a 的 baseline 绑定（按 paragraph hint 均分）升级为 **narrative IR + post-validation 两阶段算法**：用 `evidence_keywords` 反向检索 ASR 定位精确时间窗口，并补齐绑定约束（最小镜头时长、单句最多镜头数、跨段不复用）。建立 KPI 评估脚本，跑通 3 部不同类型作品的人工打标，量化绑定准确率。
 

@@ -33,28 +33,32 @@ docs/plans/
 |---|---|---|---|---|---|
 | **M1** — 基础设施 + Ingest + Index | W1 | 8 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) | ✅ 已完成 | 8/8 (M1.1-M1.8 ✅; 含 10 轮 self-check sealed via LIM#9 + LIM#8 FIXED in M2a-kickoff cleanup) |
 | **M1-e2e** — M1 milestone 人工 e2e 验收 | W1↔W2 衔接 | 1 | [`tasks/M1-infrastructure.md`](./tasks/M1-infrastructure.md) §M1.8 验收标准 | ⚪ 已跳过（用户决策直接进 M2a） | 0.2d 人工任务（uvicorn + curl POST /api/jobs；M1 已 185 单元/集成测试覆盖足够） |
-| **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | 🟡 brainstorming 中 | 0/6 |
-| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 5 | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始 | 0/5（总工时 6.0d→6.2d，adhoc plan-3 BM25 升级）|
+| **M2a** — Scripting 主链路 | W2 | 6 | [`tasks/M2a-scripting-main.md`](./tasks/M2a-scripting-main.md) | ✅ 已完成（COMPLETE-but-style-deviation-found，触发 M2a-fix） | 6/6（commit eecab0f + e883433；Session 19 端到端真实视频验收通过；但 narrative_ir.text 风格根本性偏离 design.md §8.3.2 — 实现的是百度百科, 要的是 B 站 UP 主二创视角 → 触发 M2a-fix） |
+| **M2a-fix** — 二创风格修正 + M2b-light kickoff | W2↔W3 衔接 | 5 | [`tasks/M2a-fix-narrative-style.md`](./tasks/M2a-fix-narrative-style.md) | 🟡 brainstorming COMPLETE / 待启动 Day 0 | 0/5（总工时 6.7d；含 brainstorming Q1-Q8 + 8 角度 19 项 P0 修正；Session 20 收敛） |
+| **M2b** — Scripting 鲁棒性 + narrative IR | W3 | 1（M2b-light 已并入 M2a-fix.5；M2b-full 数据驱动决定） | [`tasks/M2b-scripting-robust.md`](./tasks/M2b-scripting-robust.md) | ⏳ 待开始（v0.7 拆分修订） | 0/1（M2b-full 工时 0d 或 4d，依赖 M2a-fix.5 评估结果决策） |
 | **M3** — Render + Web + 零知识架构 | W4 | 9 | [`tasks/M3-render-web-compliance.md`](./tasks/M3-render-web-compliance.md) | ⏳ 待开始 | 0/9 |
 | **M4** — E2E + 风格扩展 + 多片回归 | W5 | 5 | [`tasks/M4-e2e-validation.md`](./tasks/M4-e2e-validation.md) | ⏳ 待开始 | 0/5 |
 | Week 6 — Buffer | W6 | — | — | ⏳ 待开始 | — |
 
-**总任务数**：33 个 + buffer
+**总任务数**：38 个 + buffer（M2a-fix 新增 5 个；M2b 原 5 个 → 1 个 M2b-full）
 
 ---
 
 ## 3. 路线图与里程碑依赖
 
 ```
-Week 1   Week 2     Week 3       Week 4         Week 5     Week 6 (buffer)
-├── M1 ─┼── M2a ───┼── M2b ─────┼── M3 ────────┼── M4 ────┼─────────────┤
-基础设施   Scripting   Scripting     Render+Web      E2E +     KPI 验收 +
-+Ingest    主链路      鲁棒性          +合规           风格扩展   关键修复
-+Index                (narrIR)                       +自评分
+Week 1   Week 2-2.5    Week 2.5-3     Week 4         Week 5     Week 6 (buffer)
+├── M1 ─┼── M2a ──┬── M2a-fix ──┼── M2b? ──┼── M3 ────────┼── M4 ────┼─────────────┤
+基础设施   Scripting   二创风格修正    Scripting    Render+Web      E2E +     KPI 验收 +
++Ingest    主链路      +M2b-light     鲁棒性?       +合规           风格扩展   关键修复
++Index                                (only full)                  +自评分
+                                      可能整体跳过
+
+(v0.7) M2a-fix 6.7d 插入 W2 末尾 → W3 初；M2b 仅保留 full 部分（0d 或 4d 数据驱动）
 ```
 
 **关键路径**（不可并行）：
-`M1.1 → M1.3 → M1.6 → M1.7 → M2a.1 → M2a.3 → M2b.1 → M2b.2 → M3.4 → M4.1`
+`M1.1 → M1.3 → M1.6 → M1.7 → M2a.1 → M2a.3 → M2a-fix.1 → M2a-fix.2 → M2a-fix.5 → (M2b-full?) → M3.4 → M4.1`
 
 **并行机会**：
 - M3.7（Web 模板）可与 M2a 并行 — 前端不依赖 Scripting
@@ -230,4 +234,5 @@ autoclip/
 | 2026-05-05 | v0.5 | M2a brainstorming v0.5 收敛 + 批次 1 文档落盘（commit pending）：① 决策矩阵嵌入 M2a-scripting-main.md 头部（Q1-Q8 + B1-B3 + D1-D4）；② M2a.1 重写为 LangChain 集成 + LLMFactory + Callback（DeepSeek 主 + dashscope 兜底，B1=A 最小化深度）；③ M2a.4 加 OutputFixingParser 不使用备注（B1=A 决策理由）；④ M2a.6 handler 流程改写（LangChain get_llm + K7 入口阈值 + K8 硬失败）；⑤ M2a.6 进度上报 5→8 细里程碑（Q8=B）；⑥ M2a.6 K-clause 新增 K3/K7/K8/K9/K10；⑦ M2a.6 测试策略改写（QwenProvider mock → LangChain FakeListChatModel）；⑧ M2a 总工时 5.5d→5.3d（M2a.1 +0.5d + M2a.6 -0.7d）；⑨ design.md ADR-001 重写（DeepSeek 主 + LangChain 抽象 + 可观测性）；⑩ pyproject.toml 依赖声明待 M2a.1 实现时执行（D4=Y 决策，本批次 doc-only 不跑 poetry install）|
 | 2026-05-05 | v0.5-corr | M2a.1 任务体补齐 v0.5 改写（commit message vs actual diff drift 修复）：commit `0e45501` 的 message 列了 10 项改动并声称 "M2a.1 rewritten: LangChain BaseChatModel integration + LLMFactory ..."，但实际 diff 仅 130 行新增 / 52 行删除，**M2a.1 任务体（M2a-scripting-main.md line 64-110）仍是 v0.4 旧版** "LLMProvider 抽象 + QwenProvider 实现 + dashscope 直连 + tenacity"。本次 file_replace 把 M2a.1 任务体重写为：标题 "LangChain 集成 + LLMFactory + LlmCallsRecorder"；删除自抽象 `LLMMessage` / `LLMResponse` dataclass，改用 LangChain 原生 `BaseMessage` / `AIMessage.usage_metadata`；实现 `get_llm()` factory（DeepSeek 主 `ChatOpenAI` + dashscope 兜底 `ChatTongyi`）+ `LlmCallsRecorder(BaseCallbackHandler)` 落盘 `{job_dir}/llm_calls/{stage}_{seq:03d}.json`；涉及文件 `providers/llm/{__init__,factory,callback}.py` + `tests/unit/test_llm_factory.py + test_llm_callback.py + tests/integration/test_dual_provider_smoke.py`；依赖 `langchain-core>=0.3,<0.4 + langchain-openai>=0.2,<0.3 + langchain-community>=0.3,<0.4 + dashscope^1.20`（D1=B 显式锁版本，删 tenacity）；工时 0.5d→1.0d。**根因**：v0.5 brainstorming 批次 1 file_replace 阵列遗漏 M2a.1 任务体那一处替换且未在批次 2 验证阶段捕获，触发 LIM#9 "downstream consumer breaks" 条款（M2a.1 实现阶段作为 plan-layer 下游消费者发现内部矛盾）。**修复**：本 commit 仅 doc-only 改动（M2a-scripting-main.md +4767 bytes / plan.md +本行），不跑 pytest、不动 src/。 |
 | 2026-05-05 | v0.6 | M2a self-review brainstorming 收敛（路径 A，doc-only，commit pending）：用户在 M2a.5 完成 / M2a.6 实现中触发 self-review，识别 3 处算法/契约缺陷并按 "Minimum code that solves the problem. Nothing speculative." 规则收敛 → **① BoundSegment target-side 时长缺失**（M2a.6 序列化层加 `target_duration_sec_estimate` 字段，按字数加权 `len(sentence) / total_chars × target_duration_sec` 估算，dataclass 不动；M3.2 TTS 实跑后回填真值改名 `target_duration_sec`）；**② K7 阈值卡点错位 + max_tokens 硬编码导致 600s 档位 100% 失败**（K7 改双闸门：输入 90k tokens / 输出按 `narrative_ir_max_tokens = clamp(target_sentences × 80 + 1000, 2000, 16000)` 动态算；K7 阈值常量从 32000 → 90000 并改名 `INPUT_TOKEN_BUDGET_K7`）；**③ evidence_keywords 在 M2a 是 dead data**（M2a.3 prompt 删除 evidence_keywords schema + 指令；NarrativeSentence.evidence_keywords 字段保留 default_factory=list 不动；M2b.4 prompt v2 加回输出要求）。影响子文档：M2a-scripting-main.md（§M2a.3 prompt 改 / §M2a.5 序列化层加 estimate / §M2a.6 双闸门 + 动态 max_tokens / Milestone 验收措辞收紧）+ M2b-scripting-robust.md（M2b.4 加 evidence_keywords prompt 加回职责 + M2b.5 加 estimate→真值回填职责）+ design.md §17.4（TimelineSegment 字段说明补 estimate vs final 的演化路径）。**根因记录**：触发本次 self-review 的提问是 "是否过度设计 / 算法是否正确"——发现 evidence_keywords 是典型 "为 M2b 预留所以让 LLM 一直生成" 的 speculative work；K7 32000 在 M2a 是死分支（DeepSeek 128k context + ASR 截 40k 字符 ≈ 18k tokens，永远到不了）。工时影响：0（仅改 prompt + 序列化层 + 常量值，无新增模块；max_tokens 动态计算抵消 evidence 删除节省的 tokens）。**LIM 关联**：本次修订是 LIM#9 "downstream consumer breaks" 的反向应用 —— self-review 在实现期内主动捕获，避免 e2e 阶段才暴露。 |
+| 2026-05-05 | v0.7 | M2a-fix 里程碑插入（M2a→M2a-fix→M2b→M3，brainstorming Session 20 收敛 + 8 角度 19 项 P0 修正落地，doc-only，commit pending）：用户在 M2a v0.6 端到端真实视频验收 (job_20260505_141111 / job_20260505_144455) 中识别 narrative_ir.text 风格根本性偏离 design.md §8.3.2 的"B 站头部影视解说 UP 主 + 二创视角"——实现的是"百度百科"，要的是"B 站 UP 主"。**brainstorming Q1-Q8** 收敛决议：Q1=D 先写设计规约 / Q2=E 混合架构（MVP 1 维 N 种 + 预留可扩展接口）/ Q3=A 3 种品类预设（shortdrama_推流 + movie_summary + anime_情绪）/ Q4=F 通用反模式 R1-R6 + 每预设 4-5 组 genre 分组 few-shot / Q5=F CLI + state.json schema bump（5 字段一并迁移）/ Q6=E M2b 拆分（light 2d + 数据驱动决定 full 0/4d）/ Q7=D 1+3 渐进交付 / Q8=E 两阶段 LLM（先推断 {genre, tone, narrative_intent} 再写文案）。**8 角度 critique 19 项 P0 修正**（产品/工程/架构/成本/测试/用户/数据/运维 圆桌辩论达成 8/8 sign-off）：① 数据契约层 5 项（三层封闭枚举 + fallback 矩阵）；② KPI 层 4 项（K-style-1 R1-R6 反模式正则扫描器 + K-style-2/3/4 LLM-as-judge）；③ 成本/性能层 3 项（preset prompt ≤3000 tokens + K6 改 90s + plot_outline hash 缓存）；④ 容错层 3 项（静态默认三元组 + Day 1 mock 失败测试 + timeline.json 记录 token/wall_time）；⑤ UX/架构层 4 项（4 意图按钮 + 自动默认 + PresetRegistry class wrapper + schema 一次 bump 7 字段）。新建子文档 [`tasks/M2a-fix-narrative-style.md`](./tasks/M2a-fix-narrative-style.md)（5 任务，6.7d）；M2b-scripting-robust.md 头部加 v0.7 修订提示（M2b-light 已并入 M2a-fix.5，M2b 自身仅保留 full 部分 0d/4d 待数据决策）；进度总览表插入 M2a-fix 行 + 路线图图示更新 + 关键路径加 M2a-fix.1/2/5。**用户关键反馈**："风格要根据内容来，不是所有都需要吐槽"（已纳入 Q8 两阶段 LLM 设计）。**工时影响**：M2a-fix 新增 6.7d（W3 buffer 占用 0.6d，剩余 0d；W6 buffer 占用 1.5d）；总工期 31.8d → 38.5d（+6.7d，+21%）。**Session 关联**：Session 20 brainstorming 完整记录见 .context/changes.md。 |
 
