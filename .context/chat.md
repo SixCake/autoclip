@@ -755,3 +755,42 @@ M2a.4 JSON repair + retry mechanism (预计 0.5d): 实现鲁棒 JSON 解析，�
 
 ### 元教训
 **NarrativeIR 时间窗口设计**: LLM 不直接输出绝对时间区间，改输出段落级粗时间窗口 (`approx_source_start_sec` / `approx_source_end_sec`) + 句级 `evidence_keywords`，由 M2b time_resolver 反向校验。这种设计解耦了 Scripting (生成解说稿) 和 Assembly (镜头绑定) 两个阶段的职责，避免 LLM 在单次调用中同时处理叙事生成和时间对齐的双重复杂度。
+
+
+---
+
+## Session 15 (2026-05-05) — M2a.4 JSON repair + retry_with_repair implementation complete (5-strategy + 35 unit tests passed)
+
+### 触发
+用户在 M2a.3 完成后曾问"测试现在链路能输出什么"，但当被告知 M2a.4/5/6 未实现需写临时调试脚本时选择「算了，等后续开发完成再进行测试，现在进入下一阶段开发」。按 project_rules 892.md 路由到 M2a.4（已规划任务），直接进入实施。
+
+### 实施过程
+1. **m2a4-1**: 创建 `src/autoclip/utils/json_repair.py`（192 行）
+   - `try_repair_json(raw)` 5 步策略管线：raw 直接 parse → `_strip_fence`（``` ```json ... ``` ``` / ``` ``` ... ``` ```）→ `_extract_json_block`（bracket-counting 状态机，尊重字符串字面量）→ `_fix_trailing_comma`（regex `,(\s*[}\]])`）→ `_convert_single_quotes`（保守策略：仅当无双引号时整体替换）→ combined 兜底
+   - `RepairFailedError(ValueError)` 携带 raw + attempts list 供调试
+   - **首次写入失败教训**：用 `cat > file << 'PYEOF'` heredoc 嵌套 `python3 -c` 写文件时，shell 将 raw string 内的 `\s` / `\1` / 转义引号反复处理，最终 `^\s*\`\`\`...` 变成损坏字符串导致 SyntaxError。修复方案：用 `python3 << 'PYEOF'` 直接执行 heredoc 内 Python 脚本，Python 内 `r'''...'''` raw triple-quoted string 一次到位，避免双层转义
+2. **m2a4-2**: 创建 `src/autoclip/utils/retry.py`（97 行）
+   - `retry_with_repair` 装饰器：指数退避（initial × backoff^n，capped at max_delay）+ 入参校验（max_attempts≥1, initial_delay≥0, max_delay≥initial_delay）+ functools.wraps 保 metadata + loguru.warning 每次重试 + 最终 raise 最后异常
+   - 自实现 for 循环不依赖 tenacity，符合 M2a.1 依赖锁版决策
+3. **m2a4-3**: 创建 `tests/unit/test_json_repair.py`（23 用例 / 7 测试类）
+   - 覆盖：already-valid（3）/ fence stripping with json/JSON/no-lang/whitespace（4）/ extract block 含 text-before/after/both/array/braces-in-string（5）/ trailing comma（3）/ single quotes（2）/ unrepairable + empty + severely-malformed（3）/ TypeError on non-str（2）/ RepairFailedError 字段（1）
+4. **m2a4-4**: 创建 `tests/unit/test_retry_decorator.py`（12 用例 / 7 测试类）
+   - 覆盖：first-attempt success / second / third attempt success / all fail re-raise last / max=1 no retry / functools.wraps name+doc / args+kwargs forwarding / max_attempts=0 raises / negative initial_delay raises / max_delay<initial raises / **exponential backoff sequence [1.0, 2.0, 3.0]**（monkeypatch time.sleep 验证 cap）
+
+### Smoke Test（实施过程中验证）
+```python
+try_repair_json('{"a":1}')                                # → {"a": 1}
+try_repair_json('```json\n{"a":1}\n```')                  # → {"a": 1}（fence 剥离）
+try_repair_json('Here is the JSON: {"a":1, "b":2,} done.') # → {"a": 1, "b": 2}（extract + trailing comma）
+```
+
+### Commit
+- `✨feat : M2a.4 implementation — JSON repair (5-strategy) + retry_with_repair decorator + 35 unit tests (35/35 passed)` → commit `42cb37f`
+- 4 files changed, 603 insertions(+)
+- pytest: **245 passed + 8 skipped**（210+35）in 5.87s
+
+### 元教训
+**Heredoc 嵌套陷阱**：写包含正则 raw string 的文件时，绝不嵌套 `cat << 'EOF' ... python3 -c "..." ... EOF`——shell 会把内层 Python 字符串的 `\s`、`\1` 等当成自己的转义序列处理。正确姿势：`python3 << 'PYEOF'` 让 shell 把整段视为 stdin 直接喂给 python3，Python 内部用 `r'''...'''` raw triple-quoted string 一次性写完。
+
+### 下一步
+M2a.5 简化版绑定算法（预估 0.8d）：按 `paragraph_hint` 时间区间贪心；`BindingMethod` enum 含 EVIDENCE_LOWCONFIDENCE 预留枚举值（plan-1 已预留，避免 M2b.2 升级时跨版本兼容性问题）。

@@ -38,6 +38,42 @@ User asked 3 times during batch-1 execution "请检查当前编辑的文件里�
 M2a.1 implementation phase: install LangChain dependencies + write factory.py + callback.py + unit tests + dual-provider smoke test. Estimated 1.0d.
 
 ---
+## 2026-05-05 (Session 15: M2a.4 JSON repair + retry decorator implementation)
+
+### Trigger
+User declined ad-hoc end-to-end test on test.mp4 (M2a.4/5/6 not yet implemented), instead requested entering next development stage. Per project_rules 892.md routed directly to M2a.4 (already-planned task, not adhoc-changes).
+
+### Implementation
+1. **m2a4-1**: Created `src/autoclip/utils/json_repair.py` (5890 bytes)
+   - `try_repair_json(raw)`: 5-strategy pipeline — raw parse → strip_fence → extract_json_block → fix_trailing_comma → convert_single_quotes → combined fallback
+   - `_extract_json_block`: bracket-counting state machine respecting string literals (handles `{"text": "hello {world}"}`)
+   - `RepairFailedError(ValueError)`: carries `raw` + `attempts` list for debugging
+   - First write attempt corrupted by shell quote-escaping (heredoc inside python -c); recreated via Python heredoc with raw string literal — AST OK after rewrite
+2. **m2a4-2**: Created `src/autoclip/utils/retry.py` (~3000 bytes)
+   - `retry_with_repair(max_attempts=3, initial_delay=1, max_delay=10, backoff_factor=2)`: exponential-backoff decorator
+   - Parameter validation: max_attempts>=1, initial_delay>=0, max_delay>=initial_delay
+   - functools.wraps preserves __name__/__doc__; loguru.warning on each retry + final raise
+   - Per M2a.1 dependency lock decision: self-implemented for-loop, no tenacity dependency
+3. **m2a4-3**: Created `tests/unit/test_json_repair.py` (23 cases across 7 test classes)
+   - TestAlreadyValidJSON (3) / TestFenceStripping (4) / TestExtractJsonBlock (5, including braces-inside-string-literal) / TestTrailingComma (3) / TestSingleQuotes (2) / TestUnrepairable (3) / TestTypeValidation (2) / TestRepairFailedErrorAttrs (1)
+4. **m2a4-4**: Created `tests/unit/test_retry_decorator.py` (12 cases across 7 test classes)
+   - TestSuccessOnFirstAttempt (1) / TestSuccessOnSecondAttempt (2) / TestAllAttemptsFail (2) / TestPreservesFunctionMetadata (1) / TestArgumentsPassedThrough (2) / TestInputValidation (3) / TestExponentialBackoff (1, monkeypatches time.sleep to verify [1.0, 2.0, 3.0] cap-at-max sequence)
+
+### Commit
+- `✨feat : M2a.4 implementation — JSON repair (5-strategy) + retry_with_repair decorator + 35 unit tests (35/35 passed)` → `42cb37f`
+- 4 files changed, 603 insertions(+) — utils/json_repair.py (192) + utils/retry.py (97) + test_json_repair.py (167) + test_retry_decorator.py (147)
+
+### Test Status
+- M2a.4 isolated: 35/35 passed in 0.04s
+- Full suite: **245 passed + 8 skipped in 5.87s** (210 + 35 new)
+
+### Decision Notes
+- Per **B1=A**: intentionally NOT using LangChain `OutputFixingParser` (would require extra LLM call for self-repair — unbounded blast radius). 5-strategy deterministic algorithm, every step unit-testable.
+- `RepairFailedError` extends `ValueError` (not `Exception`) so callers can catch by category without losing class hierarchy.
+- `retry_with_repair` is **complementary** to `ChatOpenAI(max_retries=2)` — LangChain handles HTTP layer (5xx, timeout), this decorator handles application layer (JSON parsing, schema validation).
+
+### Next
+M2a.5 simplified binding algorithm (估 0.8d): greedy binding by paragraph_hint time range, BindingMethod enum (TIME_RANGE_GREEDY / EVIDENCE_PASS / EVIDENCE_FALLBACK / EVIDENCE_LOWCONFIDENCE pre-reserved per plan-1).
 ## 2026-05-05 (Session 14: M2a.3 Narrative IR implementation)
 
 ### Trigger
