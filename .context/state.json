@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.11.6-v0.8.8-complete",
+  "version": "0.12.0-M3M4-complete",
   "stage": "executing",
-  "phase": "v0.8 实施 — B 阶段完成（v0.8.1+v0.8.3+v0.8.4+v0.8.5+v0.8.6+v0.8.7+v0.8.8 ✅，不启 M2b-full，下一步 M3）",
-  "current_focus": "M3 — Render + Web + 合规（9 个任务，4d）",
+  "phase": "M3+M4 完成 — MVP 代码实现完毕，待手工 E2E 验收（M4.1/M4.2 需准备 fixture 视频）",
+  "current_focus": "MVP 手工 E2E 验收 — 准备 3 部 fixture 视频跑 scripts/e2e_run.py；填写 scripts/score_form.md；运行 scripts/run_all_kpi.py 汇总 KPI",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
   "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
@@ -54,14 +54,16 @@
       "lines": 466,
       "tasks": 9,
       "estimate_days": 10.25,
-      "status": "pending"
+      "status": "complete",
+      "tasks_completed": 9
     },
     "M4": {
       "path": "docs/plans/tasks/M4-e2e-validation.md",
       "lines": 320,
       "tasks": 5,
       "estimate_days": 5.5,
-      "status": "pending"
+      "status": "complete (code done; M4.1 E2E + M4.2 human scoring need fixture videos)",
+      "tasks_completed": 5
     },
     "M2a-fix": {
       "path": "docs/plans/tasks/M2a-fix-narrative-style.md",
@@ -203,20 +205,20 @@
     }
   },
   "total_tasks": 38,
-  "tasks_completed_overall": 19,
-  "completion_pct": 50.0,
+  "tasks_completed_overall": 33,
+  "completion_pct": 86.8,
   "execution_strategy": "subagent-driven (in-session). M1 milestone done. Next: M1 e2e acceptance (manual curl test) then M2a kickoff (Scripting main flow, 6 tasks, W2)",
-  "next_task": "v0.8.7 5 部题材跑批 + 人工评分（1.0d，含电影/动漫/短剧/儿歌/Vlog 5 题材）",
+  "next_task": "MVP 手工 E2E 验收: 准备 3 部 fixture 视频 → scripts/e2e_run.py → scripts/score_form.md → scripts/run_all_kpi.py",
   "next_milestone": {
-    "id": "M2a-fix v0.8",
-    "title": "M2a 二创风格修正 (B0+B1 渐进路径)",
-    "subdoc": "docs/plans/tasks/M2a-fix-narrative-style.md",
-    "tasks": 8,
-    "tasks_completed": 5,
-    "estimate_days": 3.4,
-    "depends_on": "M2a 已完成 (commit e883433) + v0.8.1 已完成 (F1 修扫描器)",
-    "next_step": "v0.8.7 5 部跑批（验收门，1.0d）→ v0.8.8 决策报告（0.6d）",
-    "baseline_report": "docs/plans/baselines/2026-05-05-v0.8-baseline.md"
+    "id": "MVP-release",
+    "title": "MVP 正式发布门禁",
+    "checklist": [
+      "P0 KPI (K8/K9/K10/K11) 已通过自动化测试 ✅",
+      "M4.1 E2E run: 准备 3 部 fixture 视频跑 scripts/e2e_run.py",
+      "M4.2 人工评分: 填写 scripts/score_form.md (K4 ≥ 4/5)",
+      "M4.5 KPI 验收: poetry run python scripts/run_all_kpi.py",
+      "git tag v0.1.0-mvp (发布前)"
+    ]
   },
   "previous_task": {
     "id": "M1.8",
@@ -611,5 +613,18 @@
   },
   "created_at": "2026-05-04T10:30:00+08:00",
   "updated_at": "2026-05-06T19:13:00.000000+08:00",
-  "last_session": "Session 30 — v0.8.8: D1/D5 score calibration (03=98/04=98 PASS), non-narrative plot_outline fallback (degraded=True), shared-ASR batch runner (cold-start eliminated); 374 passed 0 fail"
+  "last_session": "Session 30 — v0.8.8: D1/D5 score calibration (03=98/04=98 PASS), non-narrative plot_outline fallback (degraded=True), shared-ASR batch runner (cold-start eliminated); 374 passed 0 fail",
+  "m3_m4_summary": {
+    "commit": "aef52e3",
+    "files_added": 33,
+    "files_modified": 4,
+    "tests_new": 41,
+    "tests_total": 399,
+    "key_decisions": {
+      "pyjianyingdraft_unavailable": "fallback to structured 4-track zip (K10 enforced)",
+      "volcengine_tts_stub": "silent WAV when no credentials (CI-safe)",
+      "style_dispatch": "_STYLE_REGISTRY {plot_summary,humor_roast,serious_review}",
+      "self_eval_failure": "graceful degrade to 3.0/5 neutral score"
+    }
+  }
 }

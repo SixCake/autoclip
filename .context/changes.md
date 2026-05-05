@@ -2357,3 +2357,78 @@ v0.8.8 backlog 处理：P0 评分维度校准 + P1 非叙事题材 fallback + P2
 - v0.8.8 P1 (0.3d): ✅ 非叙事题材 fallback 完成
 - v0.8.8 P2 (0.3d): ✅ ASR 冷启动消除方案实现（共享批跑脚本）
 - 下一步: M3 (Render + Web + 合规)
+
+## 2026-05-06 (Session 31: M3+M4 全量实施完成)
+
+### Trigger
+用户指示"现在开始 M3/M4，涉及到有分歧的内容采用推荐方案，不要咨询，直到完成所有 M3/M4 任务并通过测试"。
+
+### M3 — Render + Web + 零知识架构（9 个任务）
+
+**M3.1 TTSProvider 抽象 + VolcengineTTS stub**:
+- `src/autoclip/providers/tts/base.py`：TTSProvider ABC + TTSResult/TTSSegment dataclass
+- `src/autoclip/providers/tts/volcengine.py`：VolcengineTTSProvider（stub模式：无凭证时静音WAV）
+- `src/autoclip/providers/tts/__init__.py`：包导出
+
+**M3.2 Assembly stage handler**:
+- `src/autoclip/pipeline/assembly.py`：TTS batch synthesis → assembly.json；duration 偏差 >20% 警告
+
+**M3.3 DraftExporter base class**:
+- `src/autoclip/exporters/base.py`：4-track 合约（K10：所有 material 路径使用占位符）
+- `src/autoclip/exporters/__init__.py`：包导出
+
+**M3.4 JianyingDraftExporter**:
+- `src/autoclip/exporters/jianying.py`：pyjianyingdraft 未安装时降级为结构化 zip；4 轨道结构
+
+**M3.5 Render stage handler**:
+- `src/autoclip/pipeline/render.py`：AUTOCLIP_EXPORTER 环境变量选 exporter；K10 正则验证无绝对路径
+- `src/autoclip/pipeline/runner.py`：注册 assembly + render 模块
+
+**M3.6 JsonTimelineExporter**:
+- `src/autoclip/exporters/json_timeline.py`：防御性 fallback；4 track JSON + README.txt zip
+
+**M3.7 Web 4 页面**:
+- `src/autoclip/web/__init__.py` + `routes.py`：upload/jobs/detail/result + agreement 5个页面路由
+- `src/autoclip/web/templates/`：layout / upload / jobs / job_detail / result / agreement 6 模板
+- `src/autoclip/main.py`：mount web_router + cron cleanup 后台任务（每小时）
+
+**M3.8 零知识架构**:
+- `src/autoclip/compliance/cleanup.py`：cleanup_after_render + cron_cleanup_temp
+- `src/autoclip/compliance/audit.py`：audit CLI（list/purge --job-id/purge --all --confirm）
+- `src/autoclip/compliance/__init__.py`
+
+**M3.9 用户协议拦截**:
+- `src/autoclip/api/jobs.py`：M3.9 agreement 未勾选→400 + M4.3 style_preset 枚举校验→400
+- `upload.html`：checkbox + 提交按钮 disabled JS 联动
+
+### M4 — E2E + 风格扩展 + 自评分 + KPI 验收（5 个任务）
+
+**M4.1 E2E run 脚本**:
+- `scripts/e2e_run.py`：POST /api/jobs → 轮询 → 收集耗时 → e2e_report.json
+- `tests/fixtures/README.md`：fixture 获取说明
+
+**M4.2 评分问卷模板**:
+- `scripts/score_form.md`：4 维度（D1-D4）主观评分问卷
+
+**M4.3 风格预设扩展到 3 种**:
+- `src/autoclip/prompts/style_presets/humor_roast.py`：吐槽风，12-25字
+- `src/autoclip/prompts/style_presets/serious_review.py`：严肃影评，15-30字
+- `src/autoclip/prompts/narrative_ir.py`：_STYLE_REGISTRY 三风格分发，style_preset 参数透传
+
+**M4.4 AI 自评分 + 一键重生成**:
+- `src/autoclip/prompts/self_evaluate.py`：build_self_evaluate_messages + parse_self_evaluate_response
+- `src/autoclip/api/jobs.py`：POST /{id}/regenerate（重置 script/assembly/render，限 3 次）+ GET /{id}/download/{filename}
+
+**M4.5 错误兜底 + KPI 验收脚本**:
+- `src/autoclip/utils/error_messages.py`：异常类型 → 中文提示映射表
+- `scripts/run_all_kpi.py`：11 项 KPI 汇总（K8 coverage / K9 零知识 / K10 占位符 / K11 协议拦截自动化）
+
+### 测试验证
+- 新增 41 个单元测试（TTS/Jianying/JsonTimeline/StylePresets/SelfEvaluate）
+- 总计 399 passed, 1 skipped ✅（无回归）
+- K10 占位符自动检测测试 ✅
+- K11 协议拦截后端门禁 ✅（POST 不传 agreement → 400）
+
+### Commit
+- hash: aef52e3
+- branch: main（8 commits ahead of origin/main）

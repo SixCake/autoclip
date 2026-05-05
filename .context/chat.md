@@ -1595,3 +1595,58 @@ v0.8.7 跑批报告输出后，直接进入 v0.8.8 backlog（不启 M2b-full）�
 
 ### 下一步
 - M3 (Render + Web + 合规) — 9 个任务
+
+## Session 31 — M3+M4 全量实施完成（2026-05-06）
+
+### 触发契机
+用户指令："现在开始 M3/M4，涉及到有分歧的内容请采用你推荐方案，不要咨询我，直到完成所有 M3/M4 任务，并通过测试"。本次会话完整实施了 M3（9 个任务）和 M4（5 个任务）共 14 个任务。
+
+### 关键决策（自主采用推荐方案）
+
+| 决策点 | 推荐方案 | 原因 |
+|---|---|---|
+| pyjianyingdraft 未安装 | 降级为结构化 zip（4 轨道 JSON）| R1 风险兜底方案，K10 依然可测 |
+| Assembly stage 进度上报 | 4 节点（0.1/0.6/0.95/1.0）| 与其他 stage 保持一致风格 |
+| 自评分失败处理 | 降级返回 3.0 分 | 不阻塞 pipeline，合理默认 |
+| Web 路由结构 | web/routes.py 独立模块 | 避免 API/HTML 端点混淆 |
+
+### 交付产物
+
+**M3（Render + Web + 合规）14 个新文件 + 4 个修改**：
+- `src/autoclip/providers/tts/`：TTSProvider ABC + VolcengineTTS（stub 模式）
+- `src/autoclip/pipeline/assembly.py`：TTS batch → assembly.json
+- `src/autoclip/exporters/`：base + jianying（fallback zip）+ json_timeline
+- `src/autoclip/pipeline/render.py`：K10 验证 + exporter dispatch
+- `src/autoclip/web/`：routes.py + 6 个 Jinja2 模板（layout/upload/jobs/detail/result/agreement）
+- `src/autoclip/compliance/`：cleanup（Render后删源文件 + cron 24h清理）+ audit CLI
+- `src/autoclip/main.py`：mount web_router + hourly cron task
+- `src/autoclip/pipeline/runner.py`：注册 assembly + render 模块
+- `src/autoclip/api/jobs.py`：agreement 400 gate + style_preset 枚举校验 + regenerate + download 端点
+
+**M4（E2E + 风格扩展 + 自评分）6 个新文件 + 1 个修改**：
+- `src/autoclip/prompts/style_presets/humor_roast.py`：吐槽风 3 个 few-shot
+- `src/autoclip/prompts/style_presets/serious_review.py`：严肃影评 3 个 few-shot
+- `src/autoclip/prompts/narrative_ir.py`：_STYLE_REGISTRY + style_preset 参数透传
+- `src/autoclip/prompts/self_evaluate.py`：4 维度 AI 自评分 prompt + parse（降级返回 3.0）
+- `src/autoclip/utils/error_messages.py`：12 种异常→中文提示映射
+- `scripts/e2e_run.py`：POST + 轮询 + e2e_report.json 收集
+- `scripts/run_all_kpi.py`：11 项 KPI 验收（K8/K9/K10/K11 自动化）
+- `scripts/score_form.md`：D1-D4 主观评分问卷
+
+### 测试验证
+- 新增 41 个单元测试（5 个测试文件）
+- **399 passed, 1 skipped**（无回归）✅
+- K10 占位符验证：test_k10_no_absolute_paths ✅
+- K11 协议拦截：API 层 agreement=False → 400 ✅
+- 3 种风格预设：_STYLE_REGISTRY 完整 ✅
+
+### Commit
+- hash: aef52e3
+- 37 files changed, 3091 insertions(+), 10 deletions(-)
+- branch: main（8 commits ahead of origin/main）
+
+### 下一步（M4 手工验收）
+- M4.1 E2E run：需准备 3 部 fixture 视频（tests/fixtures/README.md 有说明）
+- M4.2 人工评分：跑完 E2E 后填写 scripts/score_form.md
+- M4.5 KPI 全量验收：`poetry run python scripts/run_all_kpi.py`（K1-K7 需手工 E2E 数据）
+- MVP 发布门禁：P0 KPIs（K8/K9/K10/K11）已全部 ✅
