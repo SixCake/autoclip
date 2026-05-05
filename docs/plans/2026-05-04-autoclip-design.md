@@ -310,7 +310,59 @@ class Job:
     output_path: str | None
     created_at: datetime
     updated_at: datetime
+
+
+# ============ v0.8.4 / v0.8.5 新增：timeline.json 顶层附加字段 ============
+# 说明：Timeline class 是 MVP 期 SQLite 持久化模型；下面两段是
+# scripting handler 实际写入磁盘的 timeline.json 顶层附加字段（不
+# 经 SQLite，直接序列化到 data/{job_id}/timeline.json）。仅文档化
+# v0.8.4 / v0.8.5 新增的两个字段，历史字段（plot_outline /
+# narrative_ir / binding_stats / segments）见对应模块 docstring。
+
+# ---- v0.8.4 新增（M2a-fix v0.8.4 commit 09b37c3）----
+# 来源：autoclip.algo.persona_inferer.PersonaInferenceResult
+# 写入位置：scripting.run_scripting() Step 2.5 → progress=0.40
+# timeline.json 路径：timeline["recommended_persona"]
+class RecommendedPersona:
+    persona_id: str          # 必须是 6 类白名单之一（toxic_middle_aged /
+                             # gen_z_internet_native / cynical_critic /
+                             # warm_storyteller / data_driven_analyst /
+                             # straight_man_witness）
+    confidence: float        # 0.0-1.0，LLM 自评置信度
+    reasoning: str           # ≤50 字中文解释，便于人工 review
+                             # 与 v0.8.7 跑批数据分析
+# 故障模式：strict — JSON 解析失败 / persona_id 不在白名单 →
+# 抛 PersonaInferenceError，pipeline 在 Step 2.5 即 raise（与 hook 区分）
+
+# ---- v0.8.5 新增（M2a-fix v0.8.5 commit 7d4bc64）----
+# 来源：autoclip.algo.hook_generator.HookCandidatesResult
+# 写入位置：scripting.run_scripting() Step 3.5 → progress=0.80
+# timeline.json 路径：timeline["hook_candidates"]
+class HookCandidate:
+    text: str                # 钩子文本（≤120 字，degrade fallback
+                             # 时来自 narrative_ir.paragraphs[0].sentences[0]）
+    style_tag: str           # 必须是 6 类白名单之一：
+                             # 反套路问句 / 数字冲击 / 反差对比 /
+                             # 悬念伏笔 / 情绪共振 / 其他
+    score: float             # 0.0-1.0，LLM 自评质量（v0.8.7 review 校准）
+
+class HookCandidates:
+    candidates: list[HookCandidate]  # 3-5 个浮动数量；degrade 时仅 1 个 fallback
+    degraded: bool           # True 表示走了 degrade fallback
+                             # （5 类触发条件：JSON 解析失败 /
+                             #  count not in [3,5] / style_tag 越界 /
+                             #  score 越界 / LLM API error）
+    degrade_reason: str      # 空字符串表示正常；非空记录降级原因
+                             # 便于 v0.8.7 跑批 review 时筛选异常样本
+# 故障模式：degrade — 任何失败均不抛异常；用 narrative_ir.paragraphs[0]
+# .sentences[0] 包成 1 候选 + style_tag="其他" + score=0.5 + degraded=True
+# （契约：钩子是装饰，不该让 narrative 已正确生成的 pipeline 崩溃）
 ```
+
+> **schema 演化原则**（v0.8.6 修订）：timeline.json 顶层字段**仅 add 不 modify**——
+> 历史 timeline.json（v0.8.3 及之前）加载时 `recommended_persona / hook_candidates`
+> 字段不存在但不应报错；新增模块在消费这两个字段时必须先 `if "xxx" in timeline:` 守卫。
+> 这条规则保证 v0.8.7 5 部跑批时既能跑新数据也能 replay 旧 baseline。
 
 ### 6.3 持久化（MVP）
 

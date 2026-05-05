@@ -59,7 +59,7 @@
 | **v0.8.3** | persona_inferer.py 改为轻量 persona_id 推断（去掉钩子+骨架的复杂输出）| 0.5d | ⏳ pending |
 | **v0.8.4** | scripting handler 注入 persona_id，按人格加载 reference 台词 | 0.3d | ⏳ pending |
 | **v0.8.5** | LLM 输出 3 个钩子候选，写入 timeline.json（OQ-C 决议）| 0.3d | ⏳ pending |
-| **v0.8.6** | timeline.json schema 加 2 字段（recommended_persona / hook_candidates，仅 add）| 0.2d | ⏳ pending |
+| **v0.8.6** | timeline.json schema 加 2 字段（recommended_persona / hook_candidates，仅 add）| 0.2d | ✅ done |
 | **v0.8.7** | 5 部不同题材视频端到端跑批 + 人工评分表 | 1.0d | ⏳ pending |
 | **v0.8.8** | 验收报告 + state.json 收尾 + 决定是否进 M3 | 0.6d | ⏳ pending |
 
@@ -122,11 +122,32 @@
 - **实现方式**：扩展现有 narrative_ir JSON schema，单 LLM call 内完成
 - **验收**：timeline.json 含 hook_candidates 字段且 len=3，每条人工 review 为"判断式"
 
-### v0.8.6 schema 扩展
+### v0.8.6 schema 扩展 ✅ done
 
-- **目标**：timeline.json 顶层加 `recommended_persona: str` + `hook_candidates: list[str]` 两字段
-- **约束**：仅 add 不 modify；旧 timeline.json 加载时这两字段为 None 不报错（Optional + default=None）
-- **验收**：旧 baseline timeline.json (job_20260505_144455) 仍能被 Pydantic 加载
+- **目标（原计划）**：timeline.json 顶层加 `recommended_persona: str` + `hook_candidates: list[str]` 两字段
+- **实际交付（scope=A 最小）**：纯文档化任务，0 代码改动
+  - 字段实际值已在 v0.8.4（commit `09b37c3`，`recommended_persona`）+ v0.8.5
+    （commit `7d4bc64`，`hook_candidates`）写入；v0.8.6 只是补 schema 文档
+  - 字段类型比原计划更丰富：`recommended_persona` 不是 `str` 而是 dict（含
+    `persona_id` + `confidence` + `reasoning` 3 子字段，dataclass dump 形式）
+  - `hook_candidates` 不是 `list[str]` 而是 dict（含 `candidates`（每条
+    `{text, style_tag, score}`）+ `degraded` + `degrade_reason`，
+    支持 v0.8.7 跑批 review 时筛选 degrade 样本）
+- **改动文件**：
+  - `docs/plans/2026-05-04-autoclip-design.md` §6.2 末尾追加 `RecommendedPersona` /
+    `HookCandidate` / `HookCandidates` dataclass 定义 + schema 演化原则（+~50 行）
+- **schema 演化原则**（v0.8.6 确立）：timeline.json 顶层**仅 add 不 modify**；
+  历史 timeline.json 加载时新字段不存在不应报错；消费方必须用
+  `if "xxx" in timeline:` 守卫。这条规则保证 v0.8.7 5 部跑批可以既跑新数据
+  又 replay v0.7/v0.8.3 baseline
+- **不在 scope**（按用户决策 scope=A 最小，留给后续任务）：
+  - 历史字段 `plot_outline / narrative_ir / binding_stats / segments` 的 schema
+    文档化（这些早在 v0.7 就存在但 design.md 从未文档化，工作量超 0.2d 预算）
+  - 旧 baseline timeline.json 加载兼容性测试（需写新测试用例，超 scope）
+- **验收**：design.md §6.2 末尾可以查到 `RecommendedPersona` + `HookCandidates`
+  完整 dataclass 定义且与 `algo/persona_inferer.py` + `algo/hook_generator.py`
+  实际字段 1:1 对齐（人工交叉对照已通过）
+- **commit**：见会话结束同步
 
 ### v0.8.7 5 部跑批 + 人工评分
 
@@ -154,7 +175,7 @@
 | v0.8.3 | 0.5d | 0.7d |
 | v0.8.4 | 0.3d | 1.0d |
 | v0.8.5 | 0.3d | 1.3d |
-| v0.8.6 | 0.2d | 1.5d |
+| v0.8.6 ✅ | 0.2d | 1.5d |
 | v0.8.7 | 1.0d | 2.5d |
 | v0.8.8 | 0.6d | 3.1d |
 | **小计** | **3.1d**（含 buffer 0.3d → 3.4d） |
