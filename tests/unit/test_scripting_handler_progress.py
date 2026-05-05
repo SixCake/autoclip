@@ -86,6 +86,18 @@ VALID_PERSONA_JSON = json.dumps(
     ensure_ascii=False,
 )
 
+# v0.8.5: hook_generator Stage1 LLM call inserted between narrative_ir and binding.
+VALID_HOOK_CANDIDATES_JSON = json.dumps(
+    {
+        "candidates": [
+            {"text": "钩子候选 1", "style_tag": "反套路问句", "score": 0.8},
+            {"text": "钩子候选 2", "style_tag": "数字冲击", "score": 0.7},
+            {"text": "钩子候选 3", "style_tag": "反差对比", "score": 0.6},
+        ],
+    },
+    ensure_ascii=False,
+)
+
 VALID_NARRATIVE_IR_JSON = json.dumps(
     {
         "paragraphs": [
@@ -168,11 +180,12 @@ class _MarkStageRecorder:
 
 class TestK10ProgressOrder:
     def test_4_milestones_in_correct_order(self, tmp_path, monkeypatch):
-        """K10 v0.8.4: 5 progress milestones (0.05/0.30/0.40/0.65/0.95) + DONE.
+        """K10 v0.8.5: 6 progress milestones (0.05/0.30/0.40/0.65/0.80/0.95) + DONE.
 
         v0.6 修订: 从 8 数值收敛到 4 (删 START 拆分 + 0.65 dead milestone).
         v0.8.4 修订: 加 persona inference Step 2.5 → 0.40 节点.
-        K10 契约弱化: progress 单调递增 + 至少含 5 个数值 + DONE=1.0.
+        v0.8.5 修订: 加 hook generation Step 3.5 → 0.80 节点 (Q3.B degrade 模式).
+        K10 契约弱化: progress 单调递增 + 至少含 6 个数值 + DONE=1.0.
         """
         job_dir = tmp_path / "job_001"
         job_dir.mkdir()
@@ -180,7 +193,7 @@ class TestK10ProgressOrder:
 
         # Inject FakeListChatModel via get_llm patch — same instance for both calls
         # (FakeListChatModel maintains internal cursor across .invoke() calls)
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
 
         def fake_get_llm(*args, **kwargs):
             return fake_llm
@@ -198,31 +211,32 @@ class TestK10ProgressOrder:
             (status, prog) for stage, status, prog in recorder.calls if stage == "script"
         ]
 
-        # v0.8.4 expected sequence: 5 RUNNING progress 数值 (+0.40 persona) + final DONE
+        # v0.8.5 expected sequence: 6 RUNNING progress 数值 (+0.80 hook) + final DONE
         expected = [
             ("running", 0.05),
             ("running", 0.30),
             ("running", 0.40),  # v0.8.4: persona inference DONE
             ("running", 0.65),
+            ("running", 0.80),  # v0.8.5: hook generation DONE
             ("running", 0.95),
             ("done", None),
         ]
         assert progress_calls == expected, (
-            f"K10 v0.8.4 progress sequence mismatch:\n  expected: {expected}\n  actual:   {progress_calls}"
+            f"K10 v0.8.5 progress sequence mismatch:\n  expected: {expected}\n  actual:   {progress_calls}"
         )
 
     def test_progress_at_least_4_milestones_with_done_complete(self, tmp_path, monkeypatch):
-        """K10 v0.8.4 弱化契约: 至少 5 次 RUNNING 调用 + 末次 progress >= 0.95 + DONE=1.0.
+        """K10 v0.8.5 弱化契约: 至少 6 次 RUNNING 调用 + 末次 progress >= 0.95 + DONE=1.0.
 
         这是面向未来的契约 (允许颗粒度调整不破): 严格数值匹配在
         test_4_milestones_in_correct_order 兜底; 这里只验证最低保证.
-        v0.8.4: 5 节点 (+persona 0.40), test name 保留向前兼容.
+        v0.8.5: 6 节点 (+hook 0.80), test name 保留向前兼容.
         """
         job_dir = tmp_path / "job_001b"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         state = JobStateFile(job_dir)
@@ -239,7 +253,7 @@ class TestK10ProgressOrder:
             if stage == "script" and status == "done"
         ]
 
-        assert len(running_progress) >= 5, f"expected >= 5 RUNNING progress calls (v0.8.4: +persona 0.40), got {len(running_progress)}"
+        assert len(running_progress) >= 6, f"expected >= 6 RUNNING progress calls (v0.8.5: +hook 0.80), got {len(running_progress)}"
         assert running_progress[-1] >= 0.95, f"final RUNNING progress should be >= 0.95, got {running_progress[-1]}"
         assert len(done_calls) == 1, f"expected exactly 1 DONE call, got {len(done_calls)}"
 
@@ -249,7 +263,7 @@ class TestK10ProgressOrder:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         state = JobStateFile(job_dir)
@@ -273,7 +287,7 @@ class TestK10ProgressOrder:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         run_scripting(job_dir)
@@ -414,7 +428,7 @@ class TestTimelineSchema:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         run_scripting(job_dir)
@@ -430,7 +444,7 @@ class TestTimelineSchema:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         run_scripting(job_dir)
@@ -448,7 +462,7 @@ class TestTimelineSchema:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON])
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON])
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
 
         run_scripting(job_dir)

@@ -13,17 +13,19 @@ Responsibilities:
 5. Naive greedy binding (M2a.5 bind_naively).
 6. Serialize timeline.json.
 
-Progress milestones (K10 v0.8.4 — 5 数值，加 persona):
+Progress milestones (K10 v0.8.5 — 6 数值，加 hook):
 - 0.05  handler entry, files loaded
 - 0.30  plot_outline LLM call DONE (response + parsed)
 - 0.40  persona_inferer LLM call DONE (recommended persona + reference lines)
 - 0.65  narrative_ir LLM call DONE (response + parsed; JSON repair if any)
+- 0.80  hook_generator LLM call DONE (3-5 candidates OR degraded fallback)
 - 0.95  binding DONE
 - 1.00  DONE (set automatically by mark_stage(DONE) at end)
 
 v0.6 修订: 进度从 8 数值收敛到 4 (删 START 拆分 + 删 0.65 dead milestone).
 v0.8.4 修订: 加 persona inference Step 2.5 → 0.40 节点 (新增 1 个 LLM call ~3-5s).
-K10 契约弱化: progress 单调递增 + 至少含上述 5 个数值 + DONE=1.0.
+v0.8.5 修订: 加 hook generation Step 3.5 → 0.80 节点 (Q3.B degrade 模式：失败不阻塞 pipeline).
+K10 契约弱化: progress 单调递增 + 至少含上述 6 个数值 + DONE=1.0.
 
 Contract with PipelineRunner (per runner.py `_stage_entrypoint`):
 - We do NOT wrap the body in try/except — entrypoint already catches and marks FAILED.
@@ -38,7 +40,7 @@ K-clause contracts (M2a brainstorming v0.5 落地):
        动态算 (calc_narrative_ir_max_tokens) 防 600s 档位 100% 失败
 - K8: plot_outline / narrative_ir final failure → raise *Error (NO graceful fallback)
 - K9: llm_calls/ written here; cleanup deferred to M3.6 (not this task)
-- K10 (v0.8.4): 5 progress milestones (0.05/0.30/0.40/0.65/0.95) 单调递增, 末次 DONE=1.0
+- K10 (v0.8.5): 6 progress milestones (0.05/0.30/0.40/0.65/0.80/0.95) 单调递增, 末次 DONE=1.0
 """
 
 from __future__ import annotations
@@ -50,6 +52,10 @@ from typing import Any
 from loguru import logger
 
 from autoclip.algo.greedy_binder import BindingResult, bind_naively
+from autoclip.algo.hook_generator import (
+    HookCandidatesResult,
+    generate_hook_candidates,
+)
 from autoclip.algo.narrative_ir import NarrativeIR, PlotOutline
 from autoclip.algo.persona_inferer import (
     PersonaInferenceResult,
@@ -401,6 +407,36 @@ def run_scripting(job_dir: Path) -> None:
         narrative_ir.total_sentences(),
     )
 
+    # --- Step 3.5: hook generation (v0.8.5 — Stage1 LLM for opening hook candidates) ---
+    # Q1=A (standalone): 4th LLM call dedicated to hook generation.
+    # Q3.A=B: input includes plot_outline + recommended_persona + narrative_ir.paragraphs[0].
+    # Q3.B=degrade: generate_hook_candidates() NEVER raises; on any failure it returns a
+    # HookCandidatesResult with degraded=True and a single fallback candidate built from
+    # narrative_ir.paragraphs[0].sentences[0].text. Pipeline continues regardless.
+    _check_cancel(state, "hook_generator_llm")
+    logger.info("[scripting] hook_generator LLM call START")
+    hook_llm = get_llm(
+        json_mode=True,
+        callbacks=[recorder],
+        temperature=0.8,  # high temperature for candidate diversity
+        max_tokens=600,
+    )
+    hook_result: HookCandidatesResult = generate_hook_candidates(
+        plot_outline, persona_result, narrative_ir, llm_client=hook_llm,
+    )
+    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.80)
+    if hook_result.degraded:
+        logger.warning(
+            "[scripting] hook_generator DEGRADED: reason={!r} fallback_count=1",
+            hook_result.degrade_reason,
+        )
+    else:
+        logger.info(
+            "[scripting] hook_generator DONE: n_candidates={} style_tags={}",
+            len(hook_result.candidates),
+            sorted({c.style_tag for c in hook_result.candidates}),
+        )
+
     # --- Step 4: greedy binding (M2a.5) ---
     # v0.6: 删除独立的 0.65 "JSON repair done" 里程碑 (dead milestone, 已并入 narrative_ir DONE);
     # 删除 0.80 binding START 节点 (与 0.95 DONE 间隔太短, 用户感知不到).
@@ -431,6 +467,17 @@ def run_scripting(job_dir: Path) -> None:
             "reasoning": persona_result.reasoning,
         },
         "narrative_ir": narrative_ir.to_dict(),
+        # v0.8.5 Q2.1=B + Q2.3=score: list of {text, style_tag, score} candidates;
+        # v0.8.5 Q3.B=degrade: degraded flag + degrade_reason for v0.8.7 review filtering;
+        # v0.8.6 schema 扩展直接复用此字段（M3.7 UI 露出由前端读 timeline.json 即可）。
+        "hook_candidates": {
+            "candidates": [
+                {"text": c.text, "style_tag": c.style_tag, "score": c.score}
+                for c in hook_result.candidates
+            ],
+            "degraded": hook_result.degraded,
+            "degrade_reason": hook_result.degrade_reason,
+        },
         "binding_stats": {
             "total_segments": binding_result.total_count,
             "fallback_count": binding_result.fallback_count,
@@ -458,7 +505,7 @@ def run_scripting(job_dir: Path) -> None:
     logger.info("[scripting] timeline.json written: n_segments={}",
                 len(timeline_payload["segments"]))
 
-    # --- Step 6: mark DONE (progress=1.0 set automatically; v0.8.4: 5 个 RUNNING 数值 0.05/0.30/0.40/0.65/0.95) ---
+    # --- Step 6: mark DONE (progress=1.0 set automatically; v0.8.5: 6 个 RUNNING 数值 0.05/0.30/0.40/0.65/0.80/0.95) ---
     state.mark_stage(Stage.SCRIPT, StageStatus.DONE)
     logger.info("[scripting] DONE job_dir={}", job_dir)
 

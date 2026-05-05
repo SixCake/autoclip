@@ -5,7 +5,7 @@ These tests run unconditionally on every CI/local pytest invocation.
 
 Coverage (complementary to test_scripting_handler_progress.py unit tests):
 - K3 real callback chain: FakeListChatModel.invoke() with callbacks=[LlmCallsRecorder]
-  → llm_calls/scripting_001.json + scripting_002.json actually written to disk
+  → llm_calls/scripting_001..004.json actually written to disk (v0.8.5: 4 LLM calls)
 - timeline.json full schema validation (top-level keys + nested types)
 - Real JSON repair chain: 1st response has trailing comma → try_repair_json fixes
   → 2nd attempt succeeds without entering retry loop's terminal branch
@@ -72,6 +72,22 @@ VALID_PERSONA_JSON = json.dumps(
     ensure_ascii=False,
 )
 
+# v0.8.5: hook_generator Stage1 LLM call inserted between narrative_ir and binding.
+# Schema must match autoclip.algo.hook_generator output (3-5 candidates, 6 style_tag whitelist).
+VALID_HOOK_CANDIDATES_JSON = json.dumps(
+    {
+        "candidates": [
+            {"text": "为什么这部片骗了千万家长？", "style_tag": "反套路问句", "score": 0.85},
+            {"text": "3 分钟戳穿教育片的伪装", "style_tag": "数字冲击", "score": 0.78},
+            {"text": "号称启蒙片，实际全是错误", "style_tag": "反差对比", "score": 0.72},
+        ],
+    },
+    ensure_ascii=False,
+)
+
+# v0.8.5 Q3.B degrade 测试用：明显非 JSON 的响应，触发 degrade fallback
+INVALID_HOOK_JSON = "this is definitely not json {{{ broken"
+
 VALID_NARRATIVE_IR_JSON = json.dumps(
     {
         "paragraphs": [
@@ -134,7 +150,7 @@ def _write_minimal_inputs(job_dir: Path) -> None:
 
 class TestK3CallbackChainE2E:
     def test_two_llm_calls_persist_to_llm_calls_directory(self, tmp_path, monkeypatch):
-        """K3: all 3 LLM calls (plot_outline + persona + narrative_ir) write to llm_calls/scripting_NNN.json."""
+        """K3: all 4 LLM calls (plot_outline + persona + narrative_ir + hook) write to llm_calls/scripting_NNN.json."""
         job_dir = tmp_path / "job_k3"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
@@ -143,7 +159,7 @@ class TestK3CallbackChainE2E:
         # Trick: monkeypatch get_llm to return a FakeListChatModel BUT inject the recorder
         # passed via `callbacks` kwarg into the fake LLM's constructor (mimics ChatOpenAI).
         recorders_received: list[LlmCallsRecorder] = []
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -163,15 +179,15 @@ class TestK3CallbackChainE2E:
         run_scripting(job_dir)
 
         # Verify recorder was actually passed to LLM constructor (K3 contract)
-        # v0.8.4: handler now makes 3 LLM calls (plot_outline + persona + narrative_ir)
-        assert len(recorders_received) == 3, (
-            f"K3 violation: expected 3 LlmCallsRecorder instances (plot_outline + persona + "
-            f"narrative_ir), got {len(recorders_received)}"
+        # v0.8.5: handler now makes 4 LLM calls (plot_outline + persona + narrative_ir + hook)
+        assert len(recorders_received) == 4, (
+            f"K3 violation: expected 4 LlmCallsRecorder instances (plot_outline + persona + "
+            f"narrative_ir + hook), got {len(recorders_received)}"
         )
-        # All 3 LLM constructions should receive the SAME recorder instance
+        # All 4 LLM constructions should receive the SAME recorder instance
         # (handler creates one recorder, reuses across all LLM calls)
-        assert recorders_received[0] is recorders_received[1] is recorders_received[2], (
-            "K3 violation: handler should reuse single recorder across all 3 LLM calls"
+        assert all(r is recorders_received[0] for r in recorders_received), (
+            "K3 violation: handler should reuse single recorder across all 4 LLM calls"
         )
 
         # Verify files actually written
@@ -179,10 +195,13 @@ class TestK3CallbackChainE2E:
         assert llm_calls_dir.exists(), "K3 violation: llm_calls/ directory not created"
         files = sorted(llm_calls_dir.iterdir())
         filenames = [f.name for f in files]
-        # v0.8.4: 3 LLM calls → 3 persisted files
-        assert filenames == ["scripting_001.json", "scripting_002.json", "scripting_003.json"], (
-            f"K3 violation: expected scripting_001.json + _002 + _003 (plot_outline + persona + "
-            f"narrative_ir), got {filenames}"
+        # v0.8.5: 4 LLM calls → 4 persisted files
+        assert filenames == [
+            "scripting_001.json", "scripting_002.json",
+            "scripting_003.json", "scripting_004.json",
+        ], (
+            f"K3 violation: expected scripting_001..004.json (plot_outline + persona + "
+            f"narrative_ir + hook), got {filenames}"
         )
 
     def test_persisted_call_record_schema(self, tmp_path, monkeypatch):
@@ -191,7 +210,7 @@ class TestK3CallbackChainE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -230,7 +249,7 @@ class TestRealJSONRepairChain:
 
         # Note: TRAILING_COMMA on 1st attempt → repair fixes inside same get_llm call;
         # 2nd get_llm() returns narrative_ir LLM with valid response.
-        responses_per_call = [TRAILING_COMMA_PLOT_OUTLINE, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [TRAILING_COMMA_PLOT_OUTLINE, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -266,7 +285,7 @@ class TestTimelineJSONSchemaE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -285,9 +304,10 @@ class TestTimelineJSONSchemaE2E:
         )
 
         # --- top-level structure ---
-        # v0.8.4 Q3=B: timeline.json 顶层加 recommended_persona dict (full dataclass dump)
+        # v0.8.5: timeline.json 顶层加 hook_candidates (Q2.1=B + Q3.B=degrade)
         assert set(timeline.keys()) == {
-            "plot_outline", "recommended_persona", "narrative_ir", "binding_stats", "segments",
+            "plot_outline", "recommended_persona", "narrative_ir",
+            "hook_candidates", "binding_stats", "segments",
         }
 
         # --- recommended_persona schema (v0.8.4 Q3=B) ---
@@ -296,6 +316,22 @@ class TestTimelineJSONSchemaE2E:
         assert rp["persona_id"] == "toxic_middle_aged"  # matches VALID_PERSONA_JSON fixture
         assert isinstance(rp["confidence"], float) and 0.0 <= rp["confidence"] <= 1.0
         assert isinstance(rp["reasoning"], str) and len(rp["reasoning"]) > 0
+
+        # --- hook_candidates schema (v0.8.5 Q2.1=B + Q2.3=score + Q3.B=degrade) ---
+        hc = timeline["hook_candidates"]
+        assert set(hc.keys()) == {"candidates", "degraded", "degrade_reason"}
+        assert hc["degraded"] is False  # happy path: not degraded
+        assert hc["degrade_reason"] == ""
+        assert isinstance(hc["candidates"], list)
+        assert 3 <= len(hc["candidates"]) <= 5  # Q2.1=B contract: 3-5 candidates
+        for cand in hc["candidates"]:
+            assert set(cand.keys()) == {"text", "style_tag", "score"}
+            assert isinstance(cand["text"], str) and len(cand["text"]) > 0
+            assert cand["style_tag"] in {
+                "反套路问句", "数字冲击", "反差对比",
+                "悬念伏笔", "情绪共振", "其他",
+            }
+            assert isinstance(cand["score"], float) and 0.0 <= cand["score"] <= 1.0
 
         # --- plot_outline schema ---
         po = timeline["plot_outline"]
@@ -360,7 +396,7 @@ class TestTimelineJSONSchemaE2E:
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON]
+        responses_per_call = [VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
         call_idx = [0]
 
         def fake_get_llm(*args, callbacks=None, **kwargs):
@@ -382,3 +418,60 @@ class TestTimelineJSONSchemaE2E:
         assert [(s["paragraph_idx"], s["sentence_idx"]) for s in segments] == [
             (1, 1), (1, 2), (2, 3)
         ]
+
+
+# ---------------------------------------------------------------------------
+# v0.8.5 Q3.B degrade path: hook LLM returns invalid JSON → pipeline NEVER crashes
+# ---------------------------------------------------------------------------
+
+
+class TestHookGenerationDegradeE2E:
+    """v0.8.5 Q3.B contract: when hook_generator LLM call fails, pipeline must continue
+    and timeline.json must contain hook_candidates with degraded=True + a single fallback
+    candidate built from narrative_ir.paragraphs[0].sentences[0].text."""
+
+    def test_invalid_hook_response_does_not_crash_pipeline(self, tmp_path, monkeypatch):
+        job_dir = tmp_path / "job_hook_degrade"
+        job_dir.mkdir()
+        _write_minimal_inputs(job_dir)
+
+        # 4 LLM calls: plot_outline OK / persona OK / narrative_ir OK / hook BROKEN
+        responses_per_call = [
+            VALID_PLOT_OUTLINE_JSON, VALID_PERSONA_JSON,
+            VALID_NARRATIVE_IR_JSON, INVALID_HOOK_JSON,
+        ]
+        call_idx = [0]
+
+        def fake_get_llm(*args, callbacks=None, **kwargs):
+            llm = FakeListChatModel(
+                responses=[responses_per_call[call_idx[0]]],
+                callbacks=callbacks or [],
+            )
+            call_idx[0] += 1
+            return llm
+
+        monkeypatch.setattr(scripting, "get_llm", fake_get_llm)
+
+        # Q3.B contract: must NOT raise
+        run_scripting(job_dir)
+
+        # Verify pipeline completed successfully despite hook failure
+        state = JobStateFile(job_dir).load()
+        assert state["stages"]["script"]["status"] == "done"
+        assert state["stages"]["script"]["progress"] == 1.0
+
+        # Verify timeline.json has hook_candidates with degraded=True flag
+        timeline = json.loads((job_dir / "timeline.json").read_text(encoding="utf-8"))
+        assert "hook_candidates" in timeline
+        hc = timeline["hook_candidates"]
+        assert hc["degraded"] is True
+        assert "Invalid JSON" in hc["degrade_reason"]
+        # Q3.B contract: exactly 1 fallback candidate, style_tag="其他", score=0.5
+        assert len(hc["candidates"]) == 1
+        fallback = hc["candidates"][0]
+        assert fallback["style_tag"] == "其他"
+        assert fallback["score"] == 0.5
+        # fallback.text comes from narrative_ir.paragraphs[0].sentences[0].text
+        # (per Q3.B contract; truncated to 120 chars)
+        assert "First sentence." in fallback["text"]
+
