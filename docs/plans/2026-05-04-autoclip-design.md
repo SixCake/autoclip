@@ -1808,6 +1808,33 @@ STYLE_PRESETS = {
 
 ---
 
+**v0.7 修订（M2a-fix brainstorming Q1-Q8 + 8 角度 critique，2026-05-05）— 升级为 5 种品类化预设矩阵**：
+
+P1-1（Eve/Lin v0.3 提案）的 3 种风格预设（plot_summary / humor_roast / serious_review）在 M2a baseline 实施过程中暴露出 **"风格按 UP 主分类而非按内容品类分类"** 的根本问题：用户上传一个动漫片段（应当用"燃向激昂"调性），但 LLM 仍按"客观剧情速览"输出冷叙述，导致 R5（第三人称冷叙述）100% 命中、K-style-1 严重超标。
+
+**根因**: 风格维度缺失"内容品类"（genre）和"叙事意图"（narrative_intent）两层正交分类，导致 1 种 preset 强行覆盖所有视频类型。
+
+**v0.7 升级方案** — 5 种品类化预设矩阵（M2a-fix.2 → M2a-fix.3 实施）:
+
+| Preset | 名称 | 默认 genre | 默认 tone | 默认 narrative_intent | 实施里程碑 |
+|---|---|---|---|---|---|
+| `movie_summary` | 电影/电视剧速览 | 电影/电视剧 | 温和讲解 / 冷静客观 | 剧情速览 | M2a-fix.2 (Day 1) |
+| `shortdrama_推流` | 短剧推流 | 短剧 | 紧张悬念 | 吐槽点评 / 情绪共鸣 | M2a-fix.3 (Day 2) |
+| `anime_情绪` | 动漫情绪向 | 动漫 | 燃向激昂 / 俏皮幽默 | 情绪共鸣 | M2a-fix.3 (Day 2) |
+| `tv_追更` | 电视剧追更（M4+） | 电视剧 | 俏皮幽默 / 紧张悬念 | 吐槽点评 / 信息盘点 | M4 预留 |
+| `movie_roast` | 电影吐槽（M4+） | 电影 | 俏皮幽默 | 吐槽点评 | M4 预留 |
+
+**MVP 阶段实施**: 仅前 3 个（movie_summary / shortdrama_推流 / anime_情绪），后 2 个（tv_追更 / movie_roast）记入 M4 预留范围。
+
+**与 P1-1 原 3 preset 的关系**:
+- `plot_summary` → 重命名为 `movie_summary`（语义更准确，对应 X 分钟看电影品类）
+- `humor_roast` → 拆分为多个 preset 的 `tone='俏皮幽默'` + `narrative_intent='吐槽点评'`组合（不再独立 preset）
+- `serious_review` → 暂缓（M4+ 视用户需求决定，目前定位偏 hardcore 影评受众较窄）
+
+**详细实施规约**: 见 `docs/plans/tasks/M2a-fix-narrative-style.md` §M2a-fix.2/.3，本里程碑 6.6d 工时实现 movie_summary + shortdrama_推流 + anime_情绪 三种 + R1-R6 反模式 hard gate（见本文档 §17.6 两阶段 LLM 设计）。
+
+---
+
 ### 17.2 AI 自评分 + 一键重生成（用户体验保底）
 
 **Status**: New (P1-2, proposed by Eve)
@@ -1948,6 +1975,41 @@ M2a baseline（HINT_UNIFORM 绑定）阶段，TimelineSegment 的 `target_start_
 
 ---
 
+**v0.7 修订（M2a-fix C5 数据契约，2026-05-05）— `(genre, narrative_intent) → preset` fallback 矩阵**：
+
+为支撑 §17.6 两阶段 LLM 的兜底路径（第 1 次调用推断 `genre + tone + narrative_intent`，第 2 次按推荐 preset 写文案），需要一份显式的 `(genre, narrative_intent) → preset` 映射表。当 LLM 推断出的组合无对应专属 preset 时，按此表回退到最近邻 preset。
+
+**fallback 矩阵**（10 genre × 5 narrative_intent = 50 格，去重后实际 14 唯一映射）:
+
+| genre \ narrative_intent | 剧情速览 | 吐槽点评 | 情绪共鸣 | 信息盘点 | 其他 |
+|---|---|---|---|---|---|
+| 电影 | movie_summary | movie_summary | anime_情绪 | movie_summary | movie_summary |
+| 电视剧 | movie_summary | movie_summary | anime_情绪 | movie_summary | movie_summary |
+| 动漫 | anime_情绪 | anime_情绪 | anime_情绪 | movie_summary | anime_情绪 |
+| 短剧 | shortdrama_推流 | shortdrama_推流 | shortdrama_推流 | shortdrama_推流 | shortdrama_推流 |
+| 综艺 | movie_summary | shortdrama_推流 | anime_情绪 | movie_summary | movie_summary |
+| 电竞 | movie_summary | shortdrama_推流 | anime_情绪 | movie_summary | movie_summary |
+| 教学 | movie_summary | movie_summary | movie_summary | movie_summary | movie_summary |
+| Vlog | movie_summary | movie_summary | anime_情绪 | movie_summary | movie_summary |
+| 纪录片 | movie_summary | movie_summary | movie_summary | movie_summary | movie_summary |
+| 其他 | movie_summary | movie_summary | movie_summary | movie_summary | movie_summary |
+
+**矩阵设计原则**:
+- **MVP 阶段只有 3 个真实 preset**（movie_summary / shortdrama_推流 / anime_情绪），矩阵每格必须落到这 3 个之一
+- **`movie_summary` 是默认兜底**（覆盖 25 格）：温和讲解 + 客观叙述风险最低，不易冒犯任何品类
+- **`shortdrama_推流` 适用范围**: 仅短剧（强相关）+ 综艺/电竞的吐槽点评（高节奏强反转场景）
+- **`anime_情绪` 适用范围**: 动漫全意图 + 影视/Vlog 的情绪共鸣（需要"哭一场"或"燃起来"）
+- **教学 / 纪录片 / 其他**: 全部走 movie_summary（这 3 类与 anime_情绪 / shortdrama_推流 调性冲突）
+
+**静态默认三元组（F1，失败兜底）**:
+- 当第 1 次 LLM 调用失败 / 输出非合法枚举值 / 网络异常时，使用 `{genre='其他', tone='温和讲解', narrative_intent='剧情速览'}`
+- 经查表 `(其他, 剧情速览) → movie_summary`
+- **justification**：温和讲解 tone 在所有调性中冒犯风险最低（俏皮幽默 / 燃向激昂在错误内容上极易翻车）；剧情速览 narrative_intent 是最常见的二创场景；其他 genre 触发"通用兜底"语义
+
+**M4+ 扩展规则**: 新增 preset（如 `tv_追更` / `movie_roast`）时，本矩阵需同步更新对应行/列；M2a-fix.4 阶段冻结此矩阵作 schema invariant。
+
+---
+
 ### 17.5 测试策略（核心算法必须有测试）
 
 **Status**: New (P1-5, proposed by Rao)
@@ -1982,6 +2044,145 @@ M2a baseline（HINT_UNIFORM 绑定）阶段，TimelineSegment 的 `target_start_
 
 **CI 配置**：MVP 用 GitHub Actions 跑 unit + integration（不跑 E2E，因为依赖外部 API），E2E 仅本地手跑。
 
+
+---
+
+### 17.6 二创风格修正：两阶段 LLM + 三层封闭枚举（M2a-fix v0.7）
+
+**Status**: New (M2a-fix milestone, 2026-05-05; brainstorming Q1-Q8 + 8 角度 critique 19 项 P0 修正共识结果)
+
+**触发原因**: M2a baseline (commit eecab0f) 端到端跑 `job_20260505_144455` 暴露 R5 第三人称冷叙述命中率 100%、缺二创视角；根因为缺少"内容品类 → 调性 → 叙事意图"的三层正交分类，单一 plot_summary preset 无法覆盖动漫/短剧/Vlog 等非影视品类。
+
+**核心设计**:
+
+#### (1) 三层封闭枚举集（C1-C4 数据契约）
+
+**`genre`（10 值，覆盖二创视频所有内容品类）**:
+
+| 枚举值 | 50 字描述符 | 典型示例 |
+|---|---|---|
+| 电影 | 院线/网络长片，单一完整叙事，时长 90+ min；解说节奏偏舒缓深度 | 流浪地球 / 让子弹飞 |
+| 电视剧 | 多集连续叙事，单集 30-60 min；解说常按集数推进或抓人物线 | 漫长的季节 / 狂飙 |
+| 动漫 | 含番剧/国漫/动画电影，强情绪表达 + ACG 受众文化背景 | 鬼灭之刃 / 中国奇谭 |
+| 短剧 | 竖屏 1-3 min/集，强反转节奏，付费引导/抖快推流场景 | 霸总短剧 / 战神短剧 |
+| 综艺 | 真人秀/访谈/竞演节目，多 MC 互动，亮点是金句和"名场面" | 脱口秀大会 / 向往的生活 |
+| 电竞 | 赛事录像/职业选手集锦，节奏快、术语密集，观众有强参与感 | LPL S 赛 / DOTA 国际邀请赛 |
+| 教学 | 知识科普/教程/课程，以信息传递为目的，受众主动学习 | 老高小茉 / B 站学习区 |
+| Vlog | 创作者第一视角生活记录，无强叙事弧，调性松弛 | 影视飓风 / 旅行 Vlog |
+| 纪录片 | 真实事件/历史/自然题材，调性偏严肃克制 | 河西走廊 / 蓝色星球 |
+| 其他 | 上述未覆盖的内容（如直播切片/短视频混剪/MV），走默认兜底 | 未分类 |
+
+**`tone`（7 值，正交于 genre 的语气调性）**:
+
+| 枚举值 | 50 字描述符 | 典型 UP 主参考 |
+|---|---|---|
+| 温和讲解 | 第三人称客观叙述，无强情绪起伏，信息密度均匀；最不易冒犯，默认兜底 | 早期"X 分钟看电影"风 |
+| 俏皮幽默 | 网络化表达 + 适度自嘲/抖机灵，节奏轻快；适合短剧/综艺/部分动漫 | 谷阿莫早期 |
+| 紧张悬念 | 多用反问/省略号/反转句式，营造"接下来会发生什么"的钩子感 | 短剧推流剪辑 |
+| 克制深沉 | 长句为主，留白多，避免感叹号；适合纪录片/严肃题材 | 木鱼水心 |
+| 燃向激昂 | 短句密集 + 大量感叹号，情绪 1:1 放大；动漫战斗场面/电竞高光首选 | LexBurner / 阿斗归来了 |
+| 冷静客观 | 类似温和讲解但更"中立"，多用数据/时间线引述；适合教学/纪录片 | 半佛仙人 |
+| 其他 | 上述未匹配的特殊调性，回退到温和讲解 | — |
+
+**`narrative_intent`（5 值，用户视角的"为什么要二创这条视频"）**:
+
+| 枚举值 | 50 字描述符 | UX 按钮文案 |
+|---|---|---|
+| 剧情速览 | 浓缩主线剧情，让没看过原片的观众快速了解；最常见 MVP 场景 | 📖 速览 / X 分钟看完 |
+| 吐槽点评 | 带创作者视角的评论，含吐槽/反差观察/金句，强个人风格 | 🎤 吐槽 / 边看边喷 |
+| 情绪共鸣 | 烘托情绪氛围（燃/泪/治愈），适合 MV 化二创和动漫"名场面"切片 | 💖 情绪 / 燃哭/治愈 |
+| 信息盘点 | TopN 排行/盘点合集格式，信息密度高节奏快 | 📊 盘点 / Top10 / 合集 |
+| 其他 | 用户暂未确定意图，走 LLM 自动推断 | 🎲 自动选择（默认） |
+
+#### (2) 两阶段 LLM 设计
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Stage 1: Genre/Tone/Intent Inference (轻量, ~3s, 缓存)  │
+│ Input: plot_outline_json (M2a-fix.2 实现)                │
+│ Output: {genre, tone_recommendation, narrative_intent}   │
+│         三个枚举值 + 50 字 reasoning                     │
+│ Failure → 静态默认三元组 F1                              │
+└──────────────────────┬──────────────────────────────────┘
+                       │ (查 §17.4 fallback 矩阵)
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│ Stage 2: Narrative IR Generation (重量, ~25s, 不缓存)   │
+│ Input: plot_outline + 选中的 preset + (genre, tone, intent) │
+│ Output: narrative_ir.paragraphs[].sentences[].text       │
+│ Hard gate: K-style-1 R1-R6 命中率 ≤ 10%                  │
+│ Failure → 重试 1 次 → 仍失败标记 stage FAILED            │
+└─────────────────────────────────────────────────────────┘
+```
+
+**缓存策略（M2a-fix.4 实现，P3）**:
+- Stage 1 缓存 key = SHA256(`plot_outline_json + style_preset + (cli_narrative_intent or '')`)
+- 同 plot_outline 切换 tone 不重复推断 → 命中率 < 100ms（vs 首次 ~3s）
+- Stage 2 不缓存（输出方差大，缓存意义小）
+
+**成本分析（K8）**:
+- Stage 1: ~500 input tokens + ~200 output tokens ≈ ¥0.001/次
+- Stage 2: ~3000 input tokens + ~5000 output tokens ≈ ¥0.05/次
+- 单次端到端 ≈ ¥0.051；缓存命中场景降至 ¥0.05（Stage 1 跳过）
+
+**失败兜底（F1）**: 见 §17.4 末尾"静态默认三元组"；任何阶段失败都不应阻塞主链路，最差降级为 movie_summary + 温和讲解。
+
+#### (3) R1-R6 反模式 hard gate（K-style-1）
+
+实现 `src/autoclip/algo/style_violations.py`（M2a-fix.1，已落地）:
+
+| ID | 反模式 | 检测方式 | M2a-fix.2 集成点 |
+|---|---|---|---|
+| R1 | 画面描述（"X 展示 Y 图片"） | 句级正则 | narrative_ir 后置扫描 |
+| R2 | 流水账动作（"然后接着"） | 句级正则 | 同上 |
+| R3 | 复读对白 | 软规则（M2a-fix.2 后续增强，需 ASR text 上下文） | 暂占位 |
+| R4 | 客观零情绪 | 段落级（≥6 句无 [！？] 且无情绪词） | 同 R1 |
+| R5 | 第三人称冷叙述 | 句级正则（"主持人/角色 + 陈述动词"开头） | 同 R1 |
+| R6 | 缺二创视角 | 段落级（无吐槽词/反差词） | 同 R1 |
+
+**hard gate 规则**: `hit_rate = 命中反模式句数 / 总句数 ≤ 10%`；超过则 stage FAILED + 1 次重试机会（M2a-fix.2 实现）。
+
+**v0.7 修订（M2a-fix v0.7.1 P0 补强）**: 详细任务拆解见 `docs/plans/tasks/M2a-fix-narrative-style.md`，5 子任务 6.6d 工时实现。
+
+---
+
+### 17.7 UX 4 意图按钮规约（M2a-fix v0.7，M3.7 Web UI 实施）
+
+**Status**: New (M2a-fix milestone, U1/U2 修正项)
+
+**触发原因**: U1 修正提出"露 4 意图按钮（narrative_intent 是否预填的开关），自动选择为默认且最显眼"。本节为 M3.7 Web UI 实施提供完整规约（本里程碑只规约不实现）。
+
+**4 意图按钮设计**:
+
+| 按钮位置 | 主文案 | 副文案（hover 显示） | 对应 narrative_intent | 视觉权重 |
+|---|---|---|---|---|
+| 第 1 位（最显眼） | 🎲 **自动选择**（默认选中） | 让 AI 看完视频后自己决定（推荐） | 不预填，走 LLM 推断 | **主按钮**（高亮 + 放大 1.2x + 默认 selected 状态） |
+| 第 2 位 | 📖 **速览** | X 分钟看完，浓缩剧情主线 | `narrative_intent='剧情速览'` | 普通按钮 |
+| 第 3 位 | 🎤 **吐槽** | 带个人风格的评论，边看边喷 | `narrative_intent='吐槽点评'` | 普通按钮 |
+| 第 4 位 | 💖 **情绪** | 烘托燃/泪/治愈氛围 | `narrative_intent='情绪共鸣'` | 普通按钮 |
+| 第 5 位 | 📊 **盘点** | TopN/合集风格，信息密度高 | `narrative_intent='信息盘点'` | 普通按钮 |
+
+**交互行为**:
+- **默认状态**: "自动选择"按钮选中（蓝色背景），其他 4 个按钮为 outline 灰边
+- **单选**: 5 个按钮互斥，点击切换；提交时把选中的 narrative_intent 通过 CLI/API 传给 dispatcher
+- **hover 提示**: 副文案 + 1 张示例图占位（M3.7 实施时填真实示例图，本规约只占位）
+- **移动端折叠**: 5 按钮在窄屏（< 480px）下水平滚动，"自动选择"始终首位置且 sticky
+
+**API/CLI 契约（M2a-fix.4 实现）**:
+- CLI 入参: `--narrative-intent {自动选择|剧情速览|吐槽点评|情绪共鸣|信息盘点|盘点|...}`
+- "自动选择"传值时不写入 state.json `narrative_intent` 字段（保留 None），由 Stage 1 LLM 推断
+- 其他 4 值传值时直接写入 state.json，Stage 1 LLM 仍跑（推断 genre + tone）但 narrative_intent 用 CLI 预填值
+
+**与 §17.6 fallback 矩阵的协同**:
+- 用户选 "📖 速览" + LLM 推断 genre='动漫' → 查矩阵 `(动漫, 剧情速览) → anime_情绪`
+- 用户选 "🎲 自动选择" → LLM 推断完整 (genre, narrative_intent) → 查矩阵选 preset
+
+**M3.7 实施任务清单**（doc-only，本里程碑不实施）:
+- [ ] 5 个按钮组件（React/Vue 任选，遵循现有 UI 库）
+- [ ] hover 提示组件 + 5 张示例图占位（图待 M3.7 设计师补）
+- [ ] 移动端响应式（≥ 320px 兼容）
+- [ ] 选中状态持久化到 localStorage（用户下次打开记住偏好）
+- [ ] A/B 测试钩子（统计 4 个非默认按钮的点击占比，反推用户真实偏好）
 
 ---
 
