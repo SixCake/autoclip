@@ -1,0 +1,192 @@
+{
+  "stage": "stage3b_chair_adjudication",
+  "method": "M4 prompt: chair adjudicates remaining stalemates from C2/C5; emit consensus_chair_decided[] + open_questions[] + corrections[]",
+  "chair_constraint": "ONLY arguments from debate_history; NO new evidence; preserve dissenting roles",
+
+  "consensus_chair_decided": [
+
+    {
+      "topic": "C2: design.md 是否允许有任何形式的'前瞻性 = 定义'",
+      "decision_type": "adopt_with_modification",
+      "decision": "design.md 保留'反向定义 + 反例库'，但强制工程隔离：定义不进任何 prompt 文件、不进任何 evaluator 评分公式，仅进 docs/anchors/README.md（人工 review checklist）。具体形式：'好二创 ≠ 描述句堆砌；好二创最低门槛 = 至少 1 个判断式钩子（前 5 句内）+ 段落主体的判断句占比 > 描述句占比；其余事后看反例库 + 锚点案例'。",
+      "rationale": "Future Self 的'必须有反向定义'是维护性硬约束（C2-R4：6 个月后我无法判断 patch 是升级成规则还是丢掉），不接受会导致项目不可维护。Devil's Advocate 的'任何前瞻性定义都会被工程师转化为约束'（C2-R2 引 autoclip 自身 v0.5→v0.7 已发生 3 次描述→约束退化）是真实历史规律，不接受会导致 6 个月后退化为新一版打地鼠。两个论点都来自 debate_history 且都成立——chair 决议通过'**工程隔离条款**'平衡：定义存在但物理位置和评分体系隔离，使其不能被工程师在 prompt 优化时'顺手用上'。这是 C2-R3 Future Self 让步方向的强化版（'代码里只有反例库'升级为'代码+evaluator 都不能引用定义'）。",
+      "supporting_roles": ["Future Self（6个月后维护autoclip的我）", "B站百万二创UP主（C1 共识隐含支持有可写下的好定义）", "B站资深内容PM（C3-R3 共识隐含支持有可量化目标分）"],
+      "dissenting_roles": ["Devil's Advocate（仍主张'仅反例库无定义'，但接受工程隔离作为防退化兜底）"],
+      "history_citations": [
+        {"stage": "2c", "round": 4, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C2-R4: design.md 必须有一行定义，否则 6 个月后无法判断 patch 该不该升级"},
+        {"stage": "2c", "round": 4, "role": "Devil's Advocate", "snippet": "C2-R4: '反向定义+反例库' 接受 50%；'≥判断+钩子' 仍是 prescriptive 模板会变成 prompt 约束"},
+        {"stage": "2c", "round": 3, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C2-R3: 折中方案——定义只用于人工评估时的对照参考，代码里完全不出现这个数字"},
+        {"stage": "2c", "round": 3, "role": "Devil's Advocate", "snippet": "C2-R3: 'docs/anchors/ 的好二创参考集（具体台词列表，不抽象成定义）'是接受边界"}
+      ]
+    },
+
+    {
+      "topic": "C5: open_question 措辞 — 是否包含'pivot 成本可控'此类乐观陈述",
+      "decision_type": "adopt",
+      "decision": "采纳 Devil's Advocate 措辞：open_question 写作'当 v1.0 前用户使用率 < X% 时，重新评估 autoclip 目标用户假设（创作者侧 vs 消费者侧）'。删除 PM 提议的'pivot 成本可控'乐观陈述，但补加一项：留 v1.0 前的'pivot 成本评估'作为单独的 P2 任务（非 open_question 的一部分），由 PM 角色 owner，使 PM 的实质关切（6 个月后没人敢按 trigger 重评估）得到落实，同时不污染 open_question 本身的中立性。",
+      "rationale": "Devil's Advocate 的论点是'没数据不要写让人放心的数字'（C5-R3），这是 GLOBAL_MUST_NOT 第 6 条 'NO 编造证据'的直接应用——'pivot 成本可控'缺乏支撑数据，写入即违反方法论。PM 的关切（C5-R3：'否则 6 个月后没人敢按 trigger 重评估'）合理但应通过另一个机制解决（独立的 pivot 成本评估任务），而不是污染 open_question。chair 决议=PM 的实质需求得到响应，但措辞采纳 Devil 版本。",
+      "supporting_roles": ["Devil's Advocate", "B站百万二创UP主（C5-R2 表态对二选一无强意见）", "Future Self（6个月后维护autoclip的我，事实数据缺失对维护是负价值）"],
+      "dissenting_roles": ["B站资深内容PM（仍认为'pivot 成本可控'是必要现实判断）"],
+      "history_citations": [
+        {"stage": "2c", "round": 3, "role": "Devil's Advocate", "snippet": "C5-R3: 不要写一个让人放心的数字；open_question 就是 open_question"},
+        {"stage": "2c", "round": 4, "role": "B站资深内容PM", "snippet": "C5-R4: 'pivot 成本可控'留着——这是产品决策的现实判断"},
+        {"stage": "2c", "round": 4, "role": "Devil's Advocate", "snippet": "C5-R4: 'pivot 成本可控' 就是没数据的乐观陈述"}
+      ]
+    }
+  ],
+
+  "open_questions": [
+    {
+      "id": "OQ1",
+      "question": "当 v1.0 前用户使用率 < X% 时，是否重新评估 autoclip 目标用户假设（创作者侧 vs 消费者侧）？",
+      "why_unresolved": "目标用户假设是产品战略级 fork，本次 debate 不应单方决议；但 v0.8 当前所有共识都基于'素人创作者'假设，需要在 v1.0 前留显式回看节点。",
+      "options_for_user": [
+        {"option": "保留为 v1.0 前 trigger（按用户使用率阈值触发 review）", "endorsed_by_roles": ["Devil's Advocate", "Future Self"], "trade_off": "防止 autoclip 沦为 5 年来失败的 AI 二创工具行列；代价是团队心理上有'pivot 风险'背景音"},
+        {"option": "锁定创作者侧不再 review（直至 v1.0 后）", "endorsed_by_roles": ["B站资深内容PM"], "trade_off": "团队聚焦不分心；代价是 6 个月后真要 pivot 时所有 v0.8 共识需推翻"},
+        {"option": "现在并行做 1 个'消费者侧 autoclip'的低成本 spike（≤2 周 + 仅 prompt 实验）", "endorsed_by_roles": ["Devil's Advocate（隐含支持）"], "trade_off": "打消 pivot 顾虑且小成本；代价是稀释 v0.8 注意力"}
+      ],
+      "user_decision_required_by": "v0.8 启动前（与 design.md 同期决策）"
+    },
+    {
+      "id": "OQ2",
+      "question": "v0.8 P0 工作流应否优先实施 Stage1（钩子+骨架）+ Stage2 优雅降级，还是先建 docs/personas/ + docs/anchors/ 再动代码？",
+      "why_unresolved": "U10 unanimous 已决议'4 件并列产出无优先级争议'，但工程上必然有起手顺序问题——是先建数据资产（personas + anchors）让 LLM 有 few-shot 引用，还是先重构架构让 Stage1/Stage2 可独立 ship？两条路 6 个月后效果可能不同。",
+      "options_for_user": [
+        {"option": "数据先行（先 docs/personas/ + docs/anchors/，再 Stage1/Stage2 重构）", "endorsed_by_roles": ["Future Self（数据资产是维护性根基）", "B站百万二创UP主（人格库是质量根基）"], "trade_off": "代码端可见进度推迟 1-2 周；优势是新架构启动时已有 ground truth"},
+        {"option": "架构先行（先 Stage1/Stage2 + 兜底降级，personas 用最小可用集启动）", "endorsed_by_roles": ["B站资深内容PM（产品 UI 价值优先）"], "trade_off": "用户最快感知改动；代价是 personas 质量在 v0.8 内是次品"},
+        {"option": "并行（数据组 + 架构组同时启动，需要分配 owner）", "endorsed_by_roles": [], "trade_off": "最快但需要协调成本；适合 1+ 工程师场景，不适合单人项目"}
+      ],
+      "user_decision_required_by": "executing-plans 启动前"
+    }
+  ],
+
+  "corrections": [
+
+    {
+      "id": "P0-1",
+      "priority": "P0",
+      "desc": "重写 design.md §17.6 为'两阶段 LLM' v2 架构：Stage1（钩子+段落骨架，独立可交付，对素人即有产品价值）→ Stage2（按推断人格生成判断句序列，有则更好，失败优雅降级到 Stage1）。同时为 Stage1 增加产品 UI 体现，使其不仅是中间数据。",
+      "owner_role": "B站资深内容PM + Future Self（共同 owner）",
+      "source": "unanimous",
+      "signed_by": ["B站百万二创UP主", "B站资深内容PM", "25岁重度二创消费者", "Devil's Advocate", "Future Self"],
+      "links_to": ["U6", "C3-R3"]
+    },
+
+    {
+      "id": "P0-2",
+      "priority": "P0",
+      "desc": "在 design.md §17.6 / §15 删除 K-style-1 hard gate (hit_rate ≤ 10%)。重定义 Stage1 过线标准 = '反例库零命中 + 钩子是判断式（人工或独立 LLM 评判）'。R1-R6 模块改名为 stage1_floor_check.py，作用域限定于 Stage1 钩子+骨架，零容忍命中。",
+      "owner_role": "Future Self（维护性 owner）",
+      "source": "unanimous",
+      "signed_by": ["B站百万二创UP主", "B站资深内容PM", "Future Self", "Devil's Advocate", "25岁重度二创消费者"],
+      "links_to": ["U1", "U8", "C4-R2"]
+    },
+
+    {
+      "id": "P0-3",
+      "priority": "P0",
+      "desc": "新建 docs/personas/ 目录 + 5-8 种封闭人格库，每个人格 1 个 markdown 文件，包含：(a) 人格描述 + (b) 5-10 条真人 reference 台词（来自具体 UP 主公开稿） + (c) 适用题材 + (d) 失败信号（这种话 ta 不会说）。必须包含 ≥1 种'冒犯型'人格（毒舌/暴躁/吐槽）。Stage2 LLM 通过 RAG/few-shot 引用此库。",
+      "owner_role": "B站百万二创UP主（创作 owner）",
+      "source": "unanimous",
+      "signed_by": ["B站百万二创UP主", "25岁重度二创消费者", "Devil's Advocate", "Future Self", "B站资深内容PM"],
+      "links_to": ["U7", "C1-R3", "C7-R2"]
+    },
+
+    {
+      "id": "P0-4",
+      "priority": "P0",
+      "desc": "新建 docs/anchors/ 目录：(a) good_examples.md ≥3 条具体台词锚点 + 'XX认为'判断句标注 + 好在哪一句话注释（首发：'木鱼水心《大话西游》/紫霞死的时候至尊宝才知道神仙也会哭'、'刘老师《情书》/她写信不是因为爱他是因为她终于可以承认曾经爱过他'、'LKs 开场公式/我跟你讲一个特别离谱的事'）+ (b) anti_examples.md 至少 2 条反例（首发 U2 + U3）。",
+      "owner_role": "25岁重度二创消费者（举证 owner，由开发者代笔）+ Future Self（结构 owner）",
+      "source": "unanimous",
+      "signed_by": ["25岁重度二创消费者", "Future Self", "Devil's Advocate", "B站百万二创UP主", "B站资深内容PM"],
+      "links_to": ["U9", "U2", "U3", "C2-R3"]
+    },
+
+    {
+      "id": "P0-5",
+      "priority": "P0",
+      "desc": "在 design.md §17.x（chair 仲裁条款）写入'好二创工程隔离定义'：'好二创 ≠ 描述句堆砌；好二创最低门槛 = 至少 1 个判断式钩子（前 5 句内）+ 段落主体的判断句占比 > 描述句占比'。**禁入约束**：此定义只能出现在 design.md 和 docs/anchors/README.md 中，不得进入任何 prompt 文件、不得进入任何 evaluator 评分公式。CI 检查添加：grep 'judgment ratio' src/autoclip/prompts/ → 必须为空。",
+      "owner_role": "Future Self（CI + 文档 owner）",
+      "source": "chair_decided",
+      "signed_by": ["Future Self", "B站百万二创UP主", "B站资深内容PM"],
+      "dissenting_signed_by": ["Devil's Advocate（接受工程隔离条款作为防退化兜底）"],
+      "links_to": ["U5", "C2 chair decision"]
+    },
+
+    {
+      "id": "P0-6",
+      "priority": "P0",
+      "desc": "为 R1-R6 每条规则在 stage1_floor_check.py 文件头强制写 sunset 注释（例：R5: '当 fallback 人格库覆盖 ≥80% 真实视频且 Stage2 输出人格腔稳定时，R5 废止'）。CI 检查添加：每个新增的 R 规则必须有 sunset 注释，否则 lint fail。",
+      "owner_role": "Future Self",
+      "source": "unanimous",
+      "signed_by": ["Future Self", "B站百万二创UP主", "B站资深内容PM", "Devil's Advocate", "25岁重度二创消费者"],
+      "links_to": ["U8", "C4-R2"]
+    },
+
+    {
+      "id": "P1-1",
+      "priority": "P1",
+      "desc": "新建 src/autoclip/algo/persona_inferer.py：第 1 阶段 LLM 输入 = 原片 ASR + 视觉关键帧描述；输出 = 推荐人格（从 docs/personas/ 库中挑 1 个） + 钩子候选 (≥3 条) + 段落骨架。该模块输出即 Stage1 交付物。",
+      "owner_role": "Future Self + B站百万二创UP主（联合 owner，前者负责工程、后者负责评估输出'人格匹配度'）",
+      "source": "unanimous",
+      "signed_by": ["B站百万二创UP主", "Future Self", "B站资深内容PM"],
+      "links_to": ["U6", "U7"]
+    },
+
+    {
+      "id": "P1-2",
+      "priority": "P1",
+      "desc": "新建 docs/anchors/README.md：写入 P0-5 的'好二创工程隔离定义' + 人工 review checklist（'每段是否有 ≥1 判断句' / '是否有判断式钩子' / '是否套人格' / '是否触发反例库'）。该 checklist 用于人工 review，不进 prompt。",
+      "owner_role": "25岁重度二创消费者（review 维度 owner）+ Future Self（结构 owner）",
+      "source": "chair_decided",
+      "signed_by": ["Future Self", "25岁重度二创消费者", "B站百万二创UP主"],
+      "dissenting_signed_by": ["Devil's Advocate（接受 checklist 形式但保留'review 仍会被反向蒸馏成 prompt'的警告）"],
+      "links_to": ["U5", "U9", "C2 chair decision"]
+    },
+
+    {
+      "id": "P1-3",
+      "priority": "P1",
+      "desc": "v0.8 目标分定义：Stage1 单独交付 = 75 分目标（素人怕丢人即可，非爆款）；Stage1+Stage2 联合交付 = 85 分目标（更高质量但允许失败）。在 design.md §17.x 写入'目标分的 0/75/85 三档'，并明确 Stage2 失败时降级到 Stage1 的 75 分门槛仍必须满足。",
+      "owner_role": "B站资深内容PM",
+      "source": "unanimous",
+      "signed_by": ["B站资深内容PM", "B站百万二创UP主", "Devil's Advocate"],
+      "links_to": ["U6", "C3-R1", "C5-R1"]
+    },
+
+    {
+      "id": "P2-1",
+      "priority": "P2",
+      "desc": "v1.0 前的'pivot 成本评估'独立任务（不属于 OQ1 open_question）：评估当前所有 v0.8 共识对'消费者侧 autoclip'的复用率（架构/数据/评估），输出一份评估报告。该任务由 PM 角色 owner，目的是让 6 个月后真要 pivot 时有数据支撑。",
+      "owner_role": "B站资深内容PM",
+      "source": "chair_decided",
+      "signed_by": ["B站资深内容PM"],
+      "dissenting_signed_by": ["Devil's Advocate（认为'pivot 成本评估'本身可能反向锁定决策）"],
+      "links_to": ["C5 chair decision", "OQ1"]
+    },
+
+    {
+      "id": "P2-2",
+      "priority": "P2",
+      "desc": "建立 v0.8 季度 review 机制：每 3 个月扫一次 stage1_floor_check.py 中的 R 规则的 sunset 条件触发情况，到期则废止规则。Future Self 负责。",
+      "owner_role": "Future Self",
+      "source": "unanimous",
+      "signed_by": ["Future Self", "Devil's Advocate"],
+      "links_to": ["U4", "U8", "C4-R2"]
+    }
+  ],
+
+  "user_decisions_required": [
+    "OQ1: 当 v1.0 前用户使用率 < X% 时，是否重新评估 autoclip 目标用户假设（创作者侧 vs 消费者侧）？",
+    "OQ2: v0.8 P0 工作流应否优先实施 Stage1+Stage2 重构，还是先建 docs/personas/ + docs/anchors/ 再动代码？"
+  ],
+
+  "summary": {
+    "chair_decisions_count": 2,
+    "open_questions_count": 2,
+    "corrections_total": 11,
+    "corrections_by_priority": {"P0": 6, "P1": 3, "P2": 2},
+    "corrections_by_source": {"unanimous": 7, "chair_decided": 4},
+    "stage3b_token_estimate_actual": "约 6K tokens（在 M4 预算内）"
+  }
+}

@@ -1,8 +1,8 @@
 {
   "project": "autoclip",
-  "version": "0.10.0-executing",
+  "version": "0.10.1-v0.8-p0-complete",
   "stage": "executing",
-  "phase": "M2a-fix 里程碑 doc-only 落盘 COMPLETE (Session 20 续 + 8 角度 critique 19 项 P0 修正); plan.md v0.7 / M2a-fix-narrative-style.md 372 行 / M2b 头部 v0.7 修订提示已加 / .context 三件套同步; ready for Day 0 = M2a-fix.1 设计规约启动; v0.7.1 P0 补强 (3 项 YAGNI 砍后修订: Optional→required 迁移 / 2.1d→2.0d / M2b-full 启动条件改用 M2a-fix 可测指标) 已落到 M2a-fix-doc + plan.md + state.json",
+  "phase": "v0.8 P0/P1 任务执行 COMPLETE",
   "current_focus": "M2a-fix.1 (Day 0, 1.1d): design.md §17.5 两阶段 LLM 章节 + §17.6 UX 4 意图按钮规约 + 三层封闭枚举集 + fallback 矩阵 + 静态默认三元组 + src/autoclip/algo/style_violations.py R1-R6 正则扫描器 (Day 1 hard gate)",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
@@ -80,45 +80,38 @@
       "p0_corrections_breakdown": "数据契约 5 (C1-C5) + KPI 测量 4 (K-style-1/2/3/4) + 成本性能 3 (P1-P3) + 容错 3 (F1-F3) + UX 架构 4 (U1/U2/A1/A2)",
       "sign_off": "8/8 angles (产品/工程/架构/成本/测试/用户/数据/运维) 圆桌辩论达成共识",
       "subtasks": []
+    },
+    "debate_2026_05_05_good_erchuang": {
+      "path": "docs/plans/debates/2026-05-05-good-erchuang-debate.md",
+      "stage_artifacts": [
+        "docs/plans/debates/2026-05-05-good-erchuang-stage1.json",
+        "docs/plans/debates/2026-05-05-good-erchuang-stage2a.json",
+        "docs/plans/debates/2026-05-05-good-erchuang-stage2b.json",
+        "docs/plans/debates/2026-05-05-good-erchuang-stage2c.json",
+        "docs/plans/debates/2026-05-05-good-erchuang-stage3a.json",
+        "docs/plans/debates/2026-05-05-good-erchuang-stage3b.json"
+      ],
+      "topic": "什么是好的二创内容？如何系统性构建？",
+      "skill_used": "multi-role-debate (重型档)",
+      "roles_count": 5,
+      "unanimous_topics": 10,
+      "chair_decisions": 2,
+      "open_questions": 2,
+      "corrections": {
+        "P0": 6,
+        "P1": 3,
+        "P2": 2,
+        "total": 11
+      },
+      "token_cost": "~54K (35 LLM calls)",
+      "supersedes": "M2a-fix.2-fix.5 sub-tasks (the fix.1 已 commit d2107fe 保留作 Stage1 floor check 基础)"
     }
   },
   "total_tasks": 34,
   "tasks_completed_overall": 14,
   "completion_pct": 41.18,
   "execution_strategy": "subagent-driven (in-session). M1 milestone done. Next: M1 e2e acceptance (manual curl test) then M2a kickoff (Scripting main flow, 6 tasks, W2)",
-  "next_task": {
-    "id": "M2a-fix.1",
-    "title": "M2a-fix.1 设计规约 + 数据契约 + KPI 测量框架 (Day 0, 1.1d)",
-    "subdoc": "docs/plans/tasks/M2a-fix-narrative-style.md#m2a-fix1",
-    "deliverables": [
-      "docs/plans/2026-05-04-autoclip-design.md 修订: §17.1 升级为 5 种品类化预设矩阵 + §17.4 加 fallback 矩阵 + 新增 §17.5 两阶段 LLM 设计章节 + §17.6 UX 4 意图按钮规约",
-      "三层封闭枚举集落入 design.md §17.5: genre(10 值) + tone(7 值) + narrative_intent(5 值), 每枚举值配 50 字描述符 + 1 个示例",
-      "fallback 矩阵: (genre, narrative_intent) → preset 映射表",
-      "静态默认三元组: {genre=其他, tone=温和讲解, narrative_intent=剧情速览} + 50 字 justification",
-      "src/autoclip/algo/style_violations.py: R1-R6 正则扫描器 (零 LLM 成本, Day 1 hard gate)",
-      "tests/unit/test_style_violations.py: 12+ 用例, 对 job_20260505_144455 的 12 句反例命中率 100%"
-    ],
-    "p0_corrections_addressed": [
-      "C1",
-      "C2",
-      "C3",
-      "C4",
-      "C5",
-      "K-style-1",
-      "F1",
-      "U1",
-      "U2"
-    ],
-    "estimate_days": 1.1,
-    "blocks": [
-      "M2a-fix.2",
-      "M2a-fix.3",
-      "M2a-fix.4",
-      "M2a-fix.5",
-      "M3.7 (UX 设计依赖)"
-    ],
-    "verification": "本任务为 doc + 1 个新 src 模块, 不动现有 pipeline; 全套 pytest 净增 12+ 用例全绿即可"
-  },
+  "next_task": "P0-3 新建 docs/personas/ + 5-8 种封闭人格库（已在 Session 22 完成）",
   "next_milestone": {
     "id": "M2a-fix",
     "title": "M2a 二创风格修正 + M2b-light kickoff",
@@ -521,5 +514,5 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-05T06:17:40.445411+00:00"
+  "updated_at": "2026-05-05T11:27:46.677521+00:00"
 }

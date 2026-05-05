@@ -1,4 +1,4 @@
-"""Narrative IR prompt builder (M2a.3).
+"""Narrative IR prompt builder (v0.8 correction — specific observation + stance interpretation).
 
 Builds messages for LLM to generate NarrativeIR from plot_outline + asr_with_timestamps.
 Injects role-aware style constraints from style_presets/plot_summary.py.
@@ -20,16 +20,9 @@ from autoclip.prompts.style_presets.plot_summary import (
 
 # === Prompt template ===
 
-SYSTEM_PROMPT_TEMPLATE = """你是一位影视剧情解说稿生成专家。
+SYSTEM_PROMPT_TEMPLATE = """你是一位 B 站头部二创解说 UP 主，擅长把原视频改写成有"二创灵魂"的解说稿。
 
 {style_description}
-
-总句数约束：目标视频时长 {target_duration_sec} 秒，按每句约 6 秒估算，应生成 N = {target_sentences} ± 5 句。
-
-角色使用规约：
-- 优先使用 main_characters 中的 role 标签（如"男主""女主""反派 A"）
-- 如果对白中明确出现了角色的 name，则使用 name
-- 禁止使用"有人""某人""一个人"等含糊词
 
 输出必须是严格的 JSON 格式，符合以下 Schema：
 {{
@@ -42,17 +35,13 @@ SYSTEM_PROMPT_TEMPLATE = """你是一位影视剧情解说稿生成专家。
       "sentences": [
         {{
           "sentence_idx": integer,
-          "text": string
+          "text": string,
+          "evidence_keywords": [string]
         }}
       ]
     }}
   ]
 }}
-
-关键约束：
-1. approx_source_start_sec / approx_source_end_sec 是段落级的粗时间窗口，不必精确到秒。
-2. 每个 paragraph 包含 2-5 个 sentences。
-3. 总 paragraphs 数量不限，但总 sentences 数应符合 N ± 5 约束。
 """
 
 USER_PROMPT_TEMPLATE = """剧情大纲：
@@ -64,7 +53,7 @@ ASR 带时间戳文本（可能截断至 40k 字符）：
 Few-shot 示例（供参考风格，不要照抄内容）：
 {few_shot_json}
 
-请严格按照上述 JSON Schema 输出 NarrativeIR。
+请严格按照上述 JSON Schema 输出 NarrativeIR，确保每句都是"具体观察 + 立场解读"。
 """
 
 
@@ -93,16 +82,14 @@ def build_narrative_ir_messages(
     main_characters = plot_outline_dict.get("main_characters", [])
     if not main_characters:
         # Omit role-aware constraints when no characters available
-        style_desc = STYLE_DESCRIPTION.split("角色使用规约：")[0].strip()
-        role_clause = "\n\n（注：当前剧情大纲未提供角色信息，可使用通用指代如「他」「她」）」"
+        style_desc = STYLE_DESCRIPTION.split("【角色称呼】")[0].strip()
+        role_clause = "\n\n【角色称呼】\n当前剧情大纲未提供角色信息，可使用通用指代如「他」「她」"
         style_desc += role_clause
     else:
         style_desc = STYLE_DESCRIPTION
 
     system_content = SYSTEM_PROMPT_TEMPLATE.format(
         style_description=style_desc,
-        target_duration_sec=target_duration_sec,
-        target_sentences=target_sentences,
     )
 
     user_content = USER_PROMPT_TEMPLATE.format(

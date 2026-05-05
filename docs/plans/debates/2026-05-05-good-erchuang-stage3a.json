@@ -1,0 +1,151 @@
+{
+  "stage": "stage3a_rule_based_unanimous_extraction",
+  "method": "scan stage1 (5 roles independent) + stage2c (resolved conflicts) — emit only items where ALL 5 roles either explicitly endorsed OR did not dissent when given the chance",
+  "scan_basis": {
+    "stage1_source": "docs/plans/debates/2026-05-05-good-erchuang-stage1.json (5 roles)",
+    "stage2c_source": "docs/plans/debates/2026-05-05-good-erchuang-stage2c.json (5 resolved + 2 stalemate)"
+  },
+
+  "consensus_unanimous": [
+
+    {
+      "topic": "U1: 反模式过滤路线（R1-R6 + hit_rate ≤ 10% hard gate）不能定义'好二创'",
+      "decision": "R1-R6 反模式过滤是'下限保护'不是'上限突破'；hit_rate ≤ 10% 作为 K-style-1 hard gate 必须废止",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM", "25岁重度二创消费者", "Devil's Advocate", "Future Self（6个月后维护autoclip的我）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "B站百万二创UP主", "snippet": "C1: 反模式过滤是'下限保护'不是'上限突破'"},
+        {"stage": 1, "role": "B站资深内容PM", "snippet": "C6: hit_rate 低≠内容好，木鱼水心 hit_rate ≈ 0% 是好内容；垃圾内容 hit_rate 也可以是 0%"},
+        {"stage": 1, "role": "25岁重度二创消费者", "snippet": "C8: '反差，绝了'类堆词只是刚好达标的 AI 文案，看 10 条会腻"},
+        {"stage": 1, "role": "Devil's Advocate", "snippet": "前瞻性视角里，唯一能定义的是'好二创的反面'（即 hit_rate < X 的那种）—你们已经在做了"},
+        {"stage": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C13: 5 维度方法论会坍缩，规则系统已饱和（每加 1 条规则 0.7 天内出现 1 次回滚）"},
+        {"stage": "2c", "round": 2, "role": "B站资深内容PM", "snippet": "C4-R2: hit_rate 作 hard gate 必须废"}
+      ],
+      "implication": "K-style-1 hard gate 在 design.md §15 / 16.6 必须移除或重定义"
+    },
+
+    {
+      "topic": "U2: 当前 autoclip 输出'旁白热情欢迎小朋友，今天要学四种动物叫声'是反例（不是好二创）",
+      "decision": "此句是公认反例。问题不在'用了旁白二字'，是 4 个 AI 味标志同时出现：上帝视角 + 套话情绪 + 教学口气 + 陈述事实埋零钩子",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM", "25岁重度二创消费者", "Devil's Advocate", "Future Self（6个月后维护autoclip的我）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "B站百万二创UP主", "snippet": "C3: 这句话再加 100 条 R 规则也救不了——根因是 LLM 没被要求'先建立情绪基调再下笔'"},
+        {"stage": 1, "role": "25岁重度二创消费者", "snippet": "C7: 1.5 秒内被划走；4 个 AI 味标志全错，修任何一处都没用"},
+        {"stage": 1, "role": "B站资深内容PM", "snippet": "(隐含同意，未为此句辩护)"},
+        {"stage": 1, "role": "Devil's Advocate", "snippet": "(隐含同意，作为'2 周 4 次翻车'临床证据引用)"},
+        {"stage": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "(隐含同意，作为规则系统饱和的证据)"}
+      ],
+      "implication": "进 docs/anchors/anti_examples.md 作为永久反例库的第 1 条"
+    },
+
+    {
+      "topic": "U3: 当前 autoclip 输出'反差，绝了！猫的声带是被牛借走了吗？'是'刚达标但仍是 AI 味'（中等反例）",
+      "decision": "此句不会让消费者立刻划走，但属于'看 10 条会腻'的 AI 二创腔；技术上符合 R1-R6 但价值上空洞，是堆 B 站黑话词的产物",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM", "25岁重度二创消费者", "Devil's Advocate", "Future Self（6个月后维护autoclip的我）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "B站百万二创UP主", "snippet": "evidence: 'AI 学会了 B 站黑话'，不是'AI 有了灵魂'"},
+        {"stage": 1, "role": "25岁重度二创消费者", "snippet": "C8: 不会划走但也不会点赞——属于'刚好达标的 AI 文案'，连看 3 条就发现都一个味"},
+        {"stage": 1, "role": "B站资深内容PM", "snippet": "C5: '形式正确但价值空洞'——技术上符合规约，价值上是空的"},
+        {"stage": 1, "role": "Devil's Advocate", "snippet": "(隐含同意)"},
+        {"stage": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "(隐含同意)"}
+      ],
+      "implication": "进 docs/anchors/anti_examples.md 作为'中等反例'——形式合规仍是反例的代表"
+    },
+
+    {
+      "topic": "U4: autoclip v0.5→v0.7 已积累 3 套并存的'风格描述系统'，规则系统已饱和",
+      "decision": "现状是工程现实，必须正视：plot_summary preset / style_description / R1-R6 三套并存，再加任何'方法论新层'都会让维护成本指数上升",
+      "all_roles_agreed": ["B站百万二创UP主（隐含）", "B站资深内容PM（隐含）", "25岁重度二创消费者（不评论但 Devil/Future Self 引用未反对）", "Devil's Advocate", "Future Self（6个月后维护autoclip的我）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "evidence: autoclip 项目 v0.5→v0.7 短短 3 周已积累 3 套并存的风格描述系统"},
+        {"stage": 1, "role": "Devil's Advocate", "snippet": "evidence: autoclip 2 周内 4 次质量投诉，每次 patch 后仍翻车——任务定义不可达征兆"},
+        {"stage": 1, "role": "B站百万二创UP主", "snippet": "C3: 再加 100 条 R 规则也救不了（隐含承认规则系统已无效继续扩张）"},
+        {"stage": "2c", "round": 1, "role": "Devil's Advocate", "snippet": "C3-R1: 继续在'一次性生成完整稿'路线加方法论，6 个月内会再翻车 5 次"}
+      ],
+      "implication": "v0.8 必须先解决'层数过多'问题，不能只在某层加新规则"
+    },
+
+    {
+      "topic": "U5: 描述句 vs 判断句是 AI 二创的核心区分维度",
+      "decision": "好二创的句子层面特征 = 判断句（句子加上'XX（作者名）认为'前缀仍成立）；坏二创 = 描述句（陈述事实/动作/画面）。autoclip 当前输出 100% 是描述句，是 AI 味的语言学根因",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM（在 C1-R3 让步接受）", "25岁重度二创消费者", "Devil's Advocate（C1-R3 接受作为内核）", "Future Self（6个月后维护autoclip的我，C2-R3 同意纳入反例库）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "25岁重度二创消费者", "snippet": "answer_to_topic: 好二创 = 句句是判断不是描述；'XX 认为'前缀法 比所有 R1-R6 都管用"},
+        {"stage": 1, "role": "B站百万二创UP主", "snippet": "answer_to_topic: 三步骤之 (1)(2)(3)，判断本质是'人格视角的语言投射'"},
+        {"stage": "2c", "round": 1, "role": "B站百万二创UP主", "snippet": "C1-R1: '判断式钩子' vs '信息式钩子' 留人率差 5-8 倍"},
+        {"stage": "2c", "round": 3, "role": "B站资深内容PM", "snippet": "C1-R3: 接受'判断式钩子'+'判断句序列'作为最终定义"}
+      ],
+      "implication": "这是 v0.8 prompt 设计的语言学锚点，应作为 evaluator 的第 1 优先级判定标准"
+    },
+
+    {
+      "topic": "U6: 'autoclip 任务边界 = 一次性生成完整稿' 不可达",
+      "decision": "全员（含 PM 在 C3-R1 让步）最终接受：v0.8 任务必须分层为 Stage1 (钩子+骨架，独立可交付) + Stage2 (判断句+人格)，Stage2 失败优雅降级到 Stage1",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM", "Devil's Advocate", "Future Self（6个月后维护autoclip的我，从'4 件并列'落地推断同意）", "25岁重度二创消费者（C1-R2 表态'两件事都要做但分约束类型'，与分层方案一致）"],
+      "evidence_trail": [
+        {"stage": "2c", "round": 3, "role": "Devil's Advocate", "snippet": "C3-R3: 三人方案完整：Stage1 独立可交付、Stage2 加判断句人格、Stage2 失败降级到 Stage1"},
+        {"stage": "2c", "round": 3, "role": "B站百万二创UP主", "snippet": "C3-R3: 同意，方案兼顾了我说的'判断句+人格'(Stage2) 和 Devil 说的'缩小任务边界'(Stage1)"},
+        {"stage": "2c", "round": 3, "role": "B站资深内容PM", "snippet": "C3-R3: 同意，补充 Stage1 输出格式必须有产品 UI 体现"}
+      ],
+      "implication": "v0.8 架构 fork 决定。直接重写 design.md §17.6 / §17.7"
+    },
+
+    {
+      "topic": "U7: 人格 = 5-8 种封闭人格库 + 每条人格配 5-10 条真人 few-shot reference + 含 ≥1 种冒犯型",
+      "decision": "人格不由 LLM 自由发挥也不由用户灌入，由 LLM 从原片推断 + 限定在 5-8 种人格库中（毒舌中年/治愈大姐/考古学家/暴躁老哥/共情学姐/...等）；每条人格在 docs/personas/ 落 markdown，包含人格描述 + 5-10 条真人 reference + 适用题材 + 失败信号",
+      "all_roles_agreed": ["B站百万二创UP主", "B站资深内容PM（C3-R3 同意整体架构）", "25岁重度二创消费者（C1-R3 加'≥1 种冒犯型'被采纳）", "Devil's Advocate（C7-R2 让步）", "Future Self（6个月后维护autoclip的我，docs/personas/ 文件化即可维护）"],
+      "evidence_trail": [
+        {"stage": "2c", "round": 3, "role": "B站百万二创UP主", "snippet": "C1-R3: 必须从有限人格库挑（5-8 种），否则 LLM 推出 AI 通用腔等于没推"},
+        {"stage": "2c", "round": 3, "role": "25岁重度二创消费者", "snippet": "C1-R3: 加一条'人格库里至少有 1 种是冒犯型'，否则全是温和型也会全员 AI 味"},
+        {"stage": "2c", "round": 2, "role": "Devil's Advocate", "snippet": "C7-R2: 'human few-shot' 方案接受，6 个月后用户盲测识别 autoclip vs 真人"},
+        {"stage": "2c", "round": 2, "role": "B站百万二创UP主", "snippet": "C7-R2: docs/personas/ 每个人格 1 个 .md（人格描述 + 5-10 真人 reference + 适用题材 + 失败信号）"}
+      ],
+      "implication": "v0.8 新增模块：persona_inferer + persona_library；新文档目录：docs/personas/"
+    },
+
+    {
+      "topic": "U8: K-style-1 hard gate 重定义",
+      "decision": "废止旧 K-style-1 (hit_rate ≤ 10%)；新 Stage1 过线标准 = '反例库零命中 + 钩子是判断式（人工或独立 LLM 评判）'；R1-R6 改作用域为只在 Stage1 钩子+骨架做下限保护（零容忍命中），且每条规则带 sunset 条件",
+      "all_roles_agreed": ["B站百万二创UP主（C4-R2 接受）", "B站资深内容PM（C4-R2 提议并同意）", "Future Self（6个月后维护autoclip的我，C4-R2 同意 sunset + 模块改名 stage1_floor_check.py）", "Devil's Advocate（C4 已 resolved 隐含同意）", "25岁重度二创消费者（C6-R1 让步'反例库'即新 gate 标准）"],
+      "evidence_trail": [
+        {"stage": "2c", "round": 2, "role": "B站资深内容PM", "snippet": "C4-R2: 废 K-style-1 hard gate；新 Stage1 gate = 反例库零命中 + 钩子是判断式（人工或独立 LLM 评判）"},
+        {"stage": "2c", "round": 2, "role": "B站百万二创UP主", "snippet": "C4-R2: 接受方案"},
+        {"stage": "2c", "round": 2, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C4-R2: R1-R6 模块改名 stage1_floor_check.py，规则文件头强制写 sunset 注释，CI 检查每个新 R 必须有 sunset"}
+      ],
+      "implication": "代码层面动作：(a) 模块改名 (b) 规则文件加 sunset 注释 (c) CI 检查 (d) design.md §15 K-style-1 段重写"
+    },
+
+    {
+      "topic": "U9: 'docs/anchors/' 锚点案例集是必须落地的工程产物",
+      "decision": "建立 docs/anchors/ 目录：(a) anti_examples.md 反例库（U2/U3 入库）+ (b) good_examples.md 锚点案例集（含'木鱼水心《大话西游》/紫霞死的时候'、'刘老师《情书》/她写信不是因为爱他'、'LKs 开场公式/我跟你讲一个特别离谱的事' 等具体台词）",
+      "all_roles_agreed": ["25岁重度二创消费者（C9 提议）", "B站百万二创UP主（answer_to_topic 多次引用木鱼水心）", "Future Self（6个月后维护autoclip的我，C14 主张'5-10 个锚点案例集'）", "Devil's Advocate（C2-R3 让步：可以有写在 docs/anchors/ 的具体台词列表）", "B站资深内容PM（C6 隐性同意，与目标用户调研锚点匹配）"],
+      "evidence_trail": [
+        {"stage": 1, "role": "25岁重度二创消费者", "snippet": "C9: 三个具体例子（木鱼水心/刘老师/LKs）的共同点 = 都有作者本人的判断句"},
+        {"stage": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C14: 5-10 个锚点案例集，每个案例标注'好在哪一句话'"},
+        {"stage": "2c", "round": 3, "role": "Devil's Advocate", "snippet": "C2-R3: 可以有 docs/anchors/ 的好二创参考集（具体台词列表，不抽象成定义）"}
+      ],
+      "implication": "新建目录 docs/anchors/{good_examples.md, anti_examples.md}；前者立即落 ≥3 条具体台词 + '好在哪一句话'注释"
+    },
+
+    {
+      "topic": "U10: 4 件并列产出，无优先级争议",
+      "decision": "v0.8 design 必交付 4 件：(1) 反向定义/反例库（C2 仲裁待 chair）+ (2) docs/anchors/good_examples.md 锚点案例 + (3) docs/personas/ 5-8 人格库 + (4) 每条 R 规则的 sunset 条件。四件并列产出，无先后争议",
+      "all_roles_agreed": ["Future Self（6个月后维护autoclip的我，C6-R1 让步）", "25岁重度二创消费者（C6-R1 让步）", "B站百万二创UP主（U7 同意 personas）", "B站资深内容PM（U6 同意 Stage1/Stage2 + Stage1 UI）", "Devil's Advocate（U6 + C2 部分让步）"],
+      "evidence_trail": [
+        {"stage": "2c", "round": 1, "role": "Future Self（6个月后维护autoclip的我）", "snippet": "C6-R1: C2/C3/C4 共识已隐性解决，三件事自然并列产出，没有先后争论必要"},
+        {"stage": "2c", "round": 1, "role": "25岁重度二创消费者", "snippet": "C6-R1: 锚点案例集已被 C2 共识收纳为 docs/anchors/"}
+      ],
+      "implication": "executing-plans 阶段可并行 4 个工作流，无依赖"
+    }
+  ],
+
+  "summary": {
+    "total_unanimous_topics": 10,
+    "by_category": {
+      "diagnostic_consensus": ["U1", "U2", "U3", "U4"],
+      "definition_consensus": ["U5", "U7"],
+      "architecture_consensus": ["U6", "U8"],
+      "deliverable_consensus": ["U9", "U10"]
+    },
+    "remaining_for_chair": ["C2 (反向定义 vs 仅反例库)", "C5 (open_question 措辞)"]
+  }
+}

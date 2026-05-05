@@ -1,11 +1,12 @@
-"""R1-R6 反模式正则扫描器（M2a-fix.1 / K-style-1 hard gate）。
+"""Stage1 Floor Check: R1-R6 反模式零容忍扫描器（autoclip v0.8）。
 
-零 LLM 成本、零外部依赖；M2a-fix.2 起作为 narrative_ir 生成后的硬门禁：
-hit_rate = 命中反模式句数 / 总句数 ≤ 10%。
+零 LLM 成本、零外部依赖；作为 Stage1（钩子+骨架）输出的硬门禁：
+**零容忍命中**（hit any anti-example → Stage1 FAILED）。
 
-反模式定义来源: brainstorming Session 20 Q4 决议（.context/changes.md L1526-1535）；
-反例锚点: data/realvideo_test/job_20260505_144455 的 12 句 narrative_ir.text，
-对 R5 应 100% 命中（验证扫描器有效性）。
+反模式定义来源: multi-role-debate U1/U8 共识（docs/plans/debates/2026-05-05-good-erchuang-debate.md）；
+反例锚点: docs/anchors/anti_examples.md（U2 + U3：上帝视角 + 套话情绪 + 教学口气 + 陈述事实零钩子）。
+
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 """
 
 from __future__ import annotations
@@ -15,23 +16,31 @@ from dataclasses import dataclass, field
 
 # ============================================================
 # R1-R6 正则规则（句级）
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 # ============================================================
 
 # R1 画面描述：「X 展示了 Y 图片/画面/镜头」
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 R1_PATTERN = re.compile(r"(展示|呈现|出现|播放|播出|画面中)[^，。！？]{0,8}(图片|画面|镜头|图像|场景)")
 
 # R2 流水账动作衔接词
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 R2_PATTERN = re.compile(r"(然后|接着|随后|之后|首先|其次|最后)")
 
 # R5 第三人称冷叙述：「主持人/角色/男主/女主/反派 X + 陈述动词」开头
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 R5_PATTERN = re.compile(
     r"^(主持人|男主|女主|反派|角色|演员)[A-Za-z0-9]?[^，。]{0,15}(说|做|介绍|展示|表扬|回顾|欢迎|宣布|告诉|讲述|提到|呈现)"
 )
 
 # R3/R4/R6 用关键词列表（段落级或软规则更准）
+# SUNSET: v1.0 前用户使用率 < 30% 时废止
 EMOTION_PUNCT = re.compile(r"[！？]")
 EMOTION_WORDS = ("离谱", "绝了", "笑死", "震惊", "不愧是", "这就是", "好家伙", "服了", "破防", "炸裂")
 ROAST_WORDS = ("反差", "操作", "属于是", "典中典", "整活", "翻车", "拉满", "尴尬到", "降智")
+
+# 禁用词清单（绝不容忍）
+BANNED_WORDS = ("绝了", "洗脑", "拉满", "良心", "顶得住", "爆棚", "有福了", "DNA 动了", "拿捏", "破防")
 
 
 # ============================================================
@@ -49,13 +58,13 @@ class SentenceViolation:
 
 
 @dataclass
-class StyleViolationReport:
-    """整段 narrative_ir 的扫描结果。"""
+class FloorCheckReport:
+    """Stage1 输出的扫描结果（零容忍命中）。"""
 
     total_sentences: int
     counts: dict[str, int]  # {'R1': 0, 'R2': 0, 'R3': 0, 'R4': 0, 'R5': 12, 'R6': 0}
-    hit_rate: float  # 命中至少一条规则的句数 / 总句数 ∈ [0, 1]
     violations: list[SentenceViolation]  # 仅保留有命中的句子
+    is_passed: bool  # 零容忍：有任何违规即为 False
 
 
 # ============================================================
@@ -72,6 +81,10 @@ def _check_sentence(text: str) -> list[str]:
         hits.append("R2")
     if R5_PATTERN.search(text):
         hits.append("R5")
+    # 检查禁用词
+    for word in BANNED_WORDS:
+        if word in text:
+            hits.append(f"BANNED:{word}")
     return hits
 
 
@@ -80,7 +93,7 @@ def _check_paragraph(sentences: list[str]) -> list[str]:
 
     R4 客观零情绪: 段落内 ≥6 句且无任何 [！？] 且无情绪词。
     R6 缺二创视角: 段落内 ≥4 句且无吐槽词/反差词。
-    R3 复读对白: 当前版本占位，需 ASR text 上下文，留给 M2a-fix.2 后续增强。
+    R3 复读对白: 当前版本占位，需 ASR text 上下文，留给后续增强。
     """
     para_hits: list[str] = []
     n = len(sentences)
@@ -97,19 +110,18 @@ def _check_paragraph(sentences: list[str]) -> list[str]:
 # ============================================================
 
 
-def scan_narrative_ir(paragraphs: list[dict]) -> StyleViolationReport:
-    """扫描 narrative_ir.paragraphs，返回 StyleViolationReport。
+def check_stage1_output(paragraphs: list[dict]) -> FloorCheckReport:
+    """扫描 Stage1 输出（钩子+骨架），返回 FloorCheckReport（零容忍命中）。
 
     Args:
-        paragraphs: narrative_ir.paragraphs 列表，每项含 'sentences': [{'sentence_idx', 'text', ...}]。
+        paragraphs: Stage1 输出的 paragraphs 列表，每项含 'sentences': [{'sentence_idx', 'text', ...}]。
 
     Returns:
-        StyleViolationReport: 含 6 条规则各自命中数、整体命中率、违规明细。
+        FloorCheckReport: 含 6 条规则各自命中数、违规明细、是否通过（零容忍）。
     """
     counts = {f"R{i}": 0 for i in range(1, 7)}
     violations: list[SentenceViolation] = []
     total_sentences = 0
-    hit_sentence_count = 0
 
     for para in paragraphs:
         sents = para.get("sentences", [])
@@ -124,9 +136,11 @@ def scan_narrative_ir(paragraphs: list[dict]) -> StyleViolationReport:
             sent_level_hits = _check_sentence(text)
             all_hits = sent_level_hits + para_level_hits
             for rule_id in all_hits:
-                counts[rule_id] += 1
+                if rule_id.startswith("R"):
+                    counts[rule_id] += 1
+                else:
+                    counts["BANNED"] = counts.get("BANNED", 0) + 1
             if all_hits:
-                hit_sentence_count += 1
                 violations.append(
                     SentenceViolation(
                         sentence_idx=s.get("sentence_idx", -1),
@@ -135,11 +149,12 @@ def scan_narrative_ir(paragraphs: list[dict]) -> StyleViolationReport:
                     )
                 )
 
-    hit_rate = hit_sentence_count / total_sentences if total_sentences > 0 else 0.0
+    # 零容忍：有任何违规即为 False
+    is_passed = len(violations) == 0
 
-    return StyleViolationReport(
+    return FloorCheckReport(
         total_sentences=total_sentences,
         counts=counts,
-        hit_rate=hit_rate,
         violations=violations,
+        is_passed=is_passed,
     )

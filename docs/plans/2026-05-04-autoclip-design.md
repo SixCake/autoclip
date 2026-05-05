@@ -2047,105 +2047,118 @@ M2a baseline（HINT_UNIFORM 绑定）阶段，TimelineSegment 的 `target_start_
 
 ---
 
-### 17.6 二创风格修正：两阶段 LLM + 三层封闭枚举（M2a-fix v0.7）
+### 17.6 二创风格修正：两阶段 LLM v2 架构（autoclip v0.8）
 
-**Status**: New (M2a-fix milestone, 2026-05-05; brainstorming Q1-Q8 + 8 角度 critique 19 项 P0 修正共识结果)
+**Status**: New (autoclip v0.8, 2026-05-05; multi-role-debate U6/U7/U8 共识结果)
 
-**触发原因**: M2a baseline (commit eecab0f) 端到端跑 `job_20260505_144455` 暴露 R5 第三人称冷叙述命中率 100%、缺二创视角；根因为缺少"内容品类 → 调性 → 叙事意图"的三层正交分类，单一 plot_summary preset 无法覆盖动漫/短剧/Vlog 等非影视品类。
+**触发原因**: autoclip v0.7 解说稿被用户判定"打地鼠式补丁、没有方向性"，根因为缺少"人格在场"和"判断句基因"。multi-role-debate 收敛出 v0.8 新架构：**Stage1（钩子+骨架，独立可交付）→ Stage2（按推断人格生成判断句序列，失败优雅降级到 Stage1）**。
 
 **核心设计**:
 
-#### (1) 三层封闭枚举集（C1-C4 数据契约）
-
-**`genre`（10 值，覆盖二创视频所有内容品类）**:
-
-| 枚举值 | 50 字描述符 | 典型示例 |
-|---|---|---|
-| 电影 | 院线/网络长片，单一完整叙事，时长 90+ min；解说节奏偏舒缓深度 | 流浪地球 / 让子弹飞 |
-| 电视剧 | 多集连续叙事，单集 30-60 min；解说常按集数推进或抓人物线 | 漫长的季节 / 狂飙 |
-| 动漫 | 含番剧/国漫/动画电影，强情绪表达 + ACG 受众文化背景 | 鬼灭之刃 / 中国奇谭 |
-| 短剧 | 竖屏 1-3 min/集，强反转节奏，付费引导/抖快推流场景 | 霸总短剧 / 战神短剧 |
-| 综艺 | 真人秀/访谈/竞演节目，多 MC 互动，亮点是金句和"名场面" | 脱口秀大会 / 向往的生活 |
-| 电竞 | 赛事录像/职业选手集锦，节奏快、术语密集，观众有强参与感 | LPL S 赛 / DOTA 国际邀请赛 |
-| 教学 | 知识科普/教程/课程，以信息传递为目的，受众主动学习 | 老高小茉 / B 站学习区 |
-| Vlog | 创作者第一视角生活记录，无强叙事弧，调性松弛 | 影视飓风 / 旅行 Vlog |
-| 纪录片 | 真实事件/历史/自然题材，调性偏严肃克制 | 河西走廊 / 蓝色星球 |
-| 其他 | 上述未覆盖的内容（如直播切片/短视频混剪/MV），走默认兜底 | 未分类 |
-
-**`tone`（7 值，正交于 genre 的语气调性）**:
-
-| 枚举值 | 50 字描述符 | 典型 UP 主参考 |
-|---|---|---|
-| 温和讲解 | 第三人称客观叙述，无强情绪起伏，信息密度均匀；最不易冒犯，默认兜底 | 早期"X 分钟看电影"风 |
-| 俏皮幽默 | 网络化表达 + 适度自嘲/抖机灵，节奏轻快；适合短剧/综艺/部分动漫 | 谷阿莫早期 |
-| 紧张悬念 | 多用反问/省略号/反转句式，营造"接下来会发生什么"的钩子感 | 短剧推流剪辑 |
-| 克制深沉 | 长句为主，留白多，避免感叹号；适合纪录片/严肃题材 | 木鱼水心 |
-| 燃向激昂 | 短句密集 + 大量感叹号，情绪 1:1 放大；动漫战斗场面/电竞高光首选 | LexBurner / 阿斗归来了 |
-| 冷静客观 | 类似温和讲解但更"中立"，多用数据/时间线引述；适合教学/纪录片 | 半佛仙人 |
-| 其他 | 上述未匹配的特殊调性，回退到温和讲解 | — |
-
-**`narrative_intent`（5 值，用户视角的"为什么要二创这条视频"）**:
-
-| 枚举值 | 50 字描述符 | UX 按钮文案 |
-|---|---|---|
-| 剧情速览 | 浓缩主线剧情，让没看过原片的观众快速了解；最常见 MVP 场景 | 📖 速览 / X 分钟看完 |
-| 吐槽点评 | 带创作者视角的评论，含吐槽/反差观察/金句，强个人风格 | 🎤 吐槽 / 边看边喷 |
-| 情绪共鸣 | 烘托情绪氛围（燃/泪/治愈），适合 MV 化二创和动漫"名场面"切片 | 💖 情绪 / 燃哭/治愈 |
-| 信息盘点 | TopN 排行/盘点合集格式，信息密度高节奏快 | 📊 盘点 / Top10 / 合集 |
-| 其他 | 用户暂未确定意图，走 LLM 自动推断 | 🎲 自动选择（默认） |
-
-#### (2) 两阶段 LLM 设计
+#### (1) 两阶段 LLM v2 架构（U6 共识）
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Stage 1: Genre/Tone/Intent Inference (轻量, ~3s, 缓存)  │
-│ Input: plot_outline_json (M2a-fix.2 实现)                │
-│ Output: {genre, tone_recommendation, narrative_intent}   │
-│         三个枚举值 + 50 字 reasoning                     │
-│ Failure → 静态默认三元组 F1                              │
+│ Stage 1: Hook + Skeleton (轻量, ~3s, 独立可交付)         │
+│ Input: ASR text + keyframe descriptions + persona_lib    │
+│ Output: {                                                │
+│   recommended_persona: str,                              │
+│   hook_candidates: list[str] (≥3 个判断式钩子),          │
+│   paragraph_skeleton: list[dict] (段落骨架)              │
+│ }                                                        │
+│ Failure → 静态默认人格"温和讲解" + 通用钩子模板           │
+│ Product UI: 4 意图按钮 + 人格选择器（见 §17.7）           │
 └──────────────────────┬──────────────────────────────────┘
-                       │ (查 §17.4 fallback 矩阵)
+                       │ (用户确认或自动选择人格)
                        ▼
 ┌─────────────────────────────────────────────────────────┐
-│ Stage 2: Narrative IR Generation (重量, ~25s, 不缓存)   │
-│ Input: plot_outline + 选中的 preset + (genre, tone, intent) │
+│ Stage 2: Judgment Sentence Generation (重量, ~25s)      │
+│ Input: paragraph_skeleton + selected_persona + anchors   │
 │ Output: narrative_ir.paragraphs[].sentences[].text       │
-│ Hard gate: K-style-1 R1-R6 命中率 ≤ 10%                  │
-│ Failure → 重试 1 次 → 仍失败标记 stage FAILED            │
+│        （每句 = 具体观察 + 立场解读，判断句占比 > 描述句）  │
+│ Floor check: stage1_floor_check.py 零容忍命中             │
+│ Failure → 优雅降级到 Stage1 输出（钩子+骨架）              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**缓存策略（M2a-fix.4 实现，P3）**:
-- Stage 1 缓存 key = SHA256(`plot_outline_json + style_preset + (cli_narrative_intent or '')`)
-- 同 plot_outline 切换 tone 不重复推断 → 命中率 < 100ms（vs 首次 ~3s）
+**关键差异 vs v0.7**:
+- **Stage1 独立可交付**：即使 Stage2 失败，Stage1 输出的钩子+骨架仍可作为"素人怕丢人"级别（75 分）的可用产物
+- **人格驱动**：Stage2 不再使用通用的 `plot_summary` preset，而是根据 Stage1 推断的人格从 `docs/personas/` 加载对应的 reference 台词供 LLM RAG 引用
+- **判断句基因**：Stage2 生成的每句话必须包含"具体观察（可验证的事实：时间/镜头/用词/节奏）+ 立场解读（为什么这样设计/有什么效果/有什么问题）"
+- **优雅降级**：Stage2 失败不阻塞主链路，直接返回 Stage1 输出（而非 v0.7 的 retry 1 次后标记 FAILED）
+
+**缓存策略**:
+- Stage 1 缓存 key = SHA256(`ASR_text_hash + keyframe_descriptions_hash`)
+- 同视频切换人格不重复推断 Stage1 → 命中率 < 100ms（vs 首次 ~3s）
 - Stage 2 不缓存（输出方差大，缓存意义小）
 
-**成本分析（K8）**:
+**成本分析**:
 - Stage 1: ~500 input tokens + ~200 output tokens ≈ ¥0.001/次
 - Stage 2: ~3000 input tokens + ~5000 output tokens ≈ ¥0.05/次
 - 单次端到端 ≈ ¥0.051；缓存命中场景降至 ¥0.05（Stage 1 跳过）
 
-**失败兜底（F1）**: 见 §17.4 末尾"静态默认三元组"；任何阶段失败都不应阻塞主链路，最差降级为 movie_summary + 温和讲解。
+**失败兜底**:
+- Stage 1 失败 → 静态默认人格"温和讲解" + 通用钩子模板（"这段视频最反常的地方是..."）
+- Stage 2 失败 → 优雅降级到 Stage1 输出（钩子+骨架），目标分 ≥75（素人怕丢人级别）
 
-#### (3) R1-R6 反模式 hard gate（K-style-1）
+#### (2) 人格库与锚点案例（U7/U9 共识）
 
-实现 `src/autoclip/algo/style_violations.py`（M2a-fix.1，已落地）:
+**人格库** (`docs/personas/`):
+- 5-8 种封闭人格库，每条人格在 `docs/personas/{persona_name}.md` 落 markdown 文件
+- 每条人格含：人格描述 + 5-10 条真人 reference 台词 + 适用题材 + 失败信号 + ≥1 种冒犯型人格
+- 已创建 6 个人格：
+  - `toxic_middle_aged.md`（毒舌中年，冒犯型 ✅）
+  - `healing_big_sister.md`（治愈大姐）
+  - `archaeologist.md`（考古学家）
+  - `rage_brother.md`（暴躁老哥，冒犯型 ✅）
+  - `empathy_senior.md`（共情学姐）
+  - `sarcastic_gen_z.md`（讽刺 Z 世代，冒犯型 ✅）
 
-| ID | 反模式 | 检测方式 | M2a-fix.2 集成点 |
+**锚点案例** (`docs/anchors/`):
+- `good_examples.md`：收录真人二创 UP 主的 reference 台词（木鱼水心《大话西游》、刘老师《情书》、LKs 开场公式）
+- `anti_examples.md`：收录 AI 味反例（U2 + U3：上帝视角 + 套话情绪 + 教学口气 + 陈述事实零钩子）
+- `README.md`：写入"好二创工程隔离定义" + 人工 review checklist
+
+**工程隔离条款**（C2 仲裁决议）:
+- "好二创"定义只能出现在 `docs/anchors/README.md`，**不得进入任何 prompt 文件、不得进入任何 evaluator 评分公式**
+- CI 检查：`grep 'judgment ratio' src/autoclip/prompts/` 必须为空
+
+#### (3) Stage1 Floor Check（U1/U8 共识）
+
+**模块改名**: `src/autoclip/algo/style_violations.py` → `src/autoclip/algo/stage1_floor_check.py`
+
+**作用域限定**: 仅作用于 Stage1 输出（钩子+骨架），**零容忍命中**（hit any anti-example → Stage1 FAILED）
+
+| ID | 反模式 | 检测方式 | Sunset 条件 |
 |---|---|---|---|
-| R1 | 画面描述（"X 展示 Y 图片"） | 句级正则 | narrative_ir 后置扫描 |
-| R2 | 流水账动作（"然后接着"） | 句级正则 | 同上 |
-| R3 | 复读对白 | 软规则（M2a-fix.2 后续增强，需 ASR text 上下文） | 暂占位 |
-| R4 | 客观零情绪 | 段落级（≥6 句无 [！？] 且无情绪词） | 同 R1 |
-| R5 | 第三人称冷叙述 | 句级正则（"主持人/角色 + 陈述动词"开头） | 同 R1 |
-| R6 | 缺二创视角 | 段落级（无吐槽词/反差词） | 同 R1 |
+| R1 | 画面描述（"X 展示 Y 图片"） | 句级正则 | v1.0 前用户使用率 < 30% 时废止 |
+| R2 | 流水账动作（"然后接着"） | 句级正则 | v1.0 前用户使用率 < 30% 时废止 |
+| R3 | 复读对白 | 软规则（需 ASR text 上下文） | v1.0 前用户使用率 < 30% 时废止 |
+| R4 | 客观零情绪 | 段落级（≥6 句无 [！？] 且无情绪词） | v1.0 前用户使用率 < 30% 时废止 |
+| R5 | 第三人称冷叙述 | 句级正则（"主持人/角色 + 陈述动词"开头） | v1.0 前用户使用率 < 30% 时废止 |
+| R6 | 缺二创视角 | 段落级（无吐槽词/反差词） | v1.0 前用户使用率 < 30% 时废止 |
 
-**hard gate 规则**: `hit_rate = 命中反模式句数 / 总句数 ≤ 10%`；超过则 stage FAILED + 1 次重试机会（M2a-fix.2 实现）。
+**禁用词清单**（绝不容忍）:
+- 绝了 / 洗脑 / 拉满 / 良心 / 顶得住 / 爆棚 / 有福了 / DNA 动了 / 拿捏 / 破防
 
-**v0.7 修订（M2a-fix v0.7.1 P0 补强）**: 详细任务拆解见 `docs/plans/tasks/M2a-fix-narrative-style.md`，5 子任务 6.6d 工时实现。
+**CI 检查**:
+- 新规则必须在 `stage1_floor_check.py` 文件头写 sunset 注释（格式：`# SUNSET: <condition>`）
+- 缺 sunset 注释即 lint fail
+
+**v0.7 废弃**:
+
+#### (4) 目标分三档（P1-3 共识）
+
+| 档位 | 场景 | 目标分 | 说明 |
+|---|---|---|---|
+| Stage1 单独 | 用户仅使用钩子+骨架 | ≥75 | "素人怕丢人"级别，可作为独立可用产物 |
+| Stage1+Stage2 | 完整两阶段流程 | ≥85 | 人格驱动的判断句序列，专业二创水平 |
+| Stage2 失败降级 | Stage2 失败后返回 Stage1 | ≥75 | 优雅降级，不阻塞主链路 |
+
+- 删除 K-style-1 hard gate (hit_rate ≤ 10%)
+- R1-R6 不再作为 Stage2 的后置扫描，改为 Stage1 的前置 floor check
 
 ---
-
 ### 17.7 UX 4 意图按钮规约（M2a-fix v0.7，M3.7 Web UI 实施）
 
 **Status**: New (M2a-fix milestone, U1/U2 修正项)
@@ -2568,3 +2581,86 @@ def transcribe(audio_path: Path, language: str = "zh") -> ASRResult:
 | **D. 双轨落盘**（采纳） | 磁盘换 CPU；检测 / 出片关注点分离；语义天然对齐 |
 
 **回滚策略**: 若 R18 触发严重磁盘问题，可走 INGEST_SINGLE_TRACK=1 应急（functional 等价于 ADR-010 之前的方案，但 hd 轨道不丢失出片质量）。
+
+---
+
+## 25. ADR-011（新增）：好二创工程隔离定义（v0.8 P0-5）
+
+**触发**: 2026-05-05 multi-role-debate consensus — autoclip v0.7 解说稿被用户判定"打地鼠式补丁、没有方向性"，要求先回答"什么是好二创"再动代码。
+
+**决策来源**: docs/plans/debates/2026-05-05-good-erchuang-debate.md Section 5 (Chair 仲裁 C2) + Section 6 (P0-5)。
+
+### 25.1 好二创的工程隔离定义
+
+> **好二创 ≠ 描述句堆砌；好二创最低门槛 = 至少 1 个判断式钩子（前 5 句内）+ 段落主体的判断句占比 > 描述句占比；其余事后看反例库 + 锚点案例。**
+
+**关键约束（工程隔离条款）**：
+- ✅ **此定义只能出现在** `docs/anchors/README.md`（人工 review checklist）
+- ❌ **不得进入任何 prompt 文件**（`src/autoclip/prompts/` 下禁止出现 "judgment ratio" / "判断句占比" 等字样）
+- ❌ **不得进入任何 evaluator 评分公式**（防止反向蒸馏成约束规则）
+- ✅ **CI 检查**：`grep -r 'judgment ratio\|判断句占比' src/autoclip/prompts/` 必须为空，否则 lint fail
+
+**理由**：
+- Future Self（C2-R4）"必须有反向定义"是维护性硬约束（6 个月后无法判断 patch 是升级成规则还是丢掉）
+- Devil's Advocate（C2-R2）"任何前瞻性定义都会被工程师转化为约束"是真实历史规律（autoclip v0.5→v0.7 已发生 3 次描述→约束退化）
+- Chair 决议通过"工程隔离条款"两全：定义存在但物理位置和评分体系隔离
+
+### 25.2 反例库与锚点案例集
+
+**反例库**（`docs/anchors/anti_examples.md`）：
+- U2 反例：上帝视角 + 套话情绪 + 教学口气 + 陈述事实零钩子
+- U3 反例：刚达标但仍是 AI 味（堆黑话词）
+- 用途：用于 `stage1_floor_check.py` 的零容忍检测，命中即失败
+
+**锚点案例集**（`docs/anchors/good_examples.md`）：
+- 木鱼水心《大话西游》解说（情感解读类）
+- 刘老师《情书》解说（文艺片解读类）
+- LKs 开场公式（科技/知识区通用钩子）
+- 用途：为 LLM 提供真人二创 UP 主的 reference 台词，供 RAG 引用
+
+### 25.3 人格库（P0-3）
+
+**人格库目录**（`docs/personas/`）：
+- 毒舌中年（toxic_middle_aged.md）— 冒犯型 ✅
+- 治愈大姐（healing_big_sister.md）
+- 考古学家（archaeologist.md）
+- 暴躁老哥（rage_brother.md）— 冒犯型 ✅
+- 共情学姐（empathy_senior.md）
+- 讽刺 Z 世代（sarcastic_gen_z.md）— 冒犯型 ✅
+
+**每个人格文件结构**：
+```markdown
+# 人格名称
+
+## 人格描述
+- 年龄 / 职业背景 / 语言风格 / 核心价值观 / 适用题材
+
+## 真人 Reference 台词（5-10 条）
+1. "..."
+2. "..."
+
+## 失败信号
+- 观众评论特征 / 完播率阈值 / 弹幕关键词频率
+
+## 冒犯型人格
+✅ 是 / ❌ 否
+```
+
+### 25.4 Consequences
+
+**正面影响**：
+- ✅ 防止"好二创定义"被反向蒸馏成 prompt 约束（历史教训：v0.5→v0.7 已发生 3 次）
+- ✅ 数据资产先行（personas + anchors），不靠规则靠样本
+- ✅ 人工 review checklist 可操作（每段 ≥1 判断句 / 钩子是判断式 / 套人格 / 触发反例库）
+
+**负面影响**：
+- ❌ 代码端可见进度推迟 1-2 周（新架构启动时已有 ground truth）
+- ❌ personas 在 v0.8 内是次品（最小可用集，需后续迭代）
+
+**工期影响**：
+- P0-3（personas）：0.5d（6 种人格 × 0.08d/种）
+- P0-4（anchors）：0.3d（good_examples + anti_examples）
+- P0-5（工程隔离定义）：0.1d（design.md 追加 + CI 检查脚本）
+- **总计**：0.9d
+
+**回滚策略**：若 v0.8 实施后发现 personas 质量不足，可走 OQ2 选项 B（架构先行，personas 用最小可用集）应急。

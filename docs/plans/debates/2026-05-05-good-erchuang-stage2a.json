@@ -1,0 +1,34 @@
+{
+  "stage": "stage2a_explicit_conflicts",
+  "method": "rule-based scan: stance + keyword signal",
+  "explicit_conflicts": [
+    {
+      "topic_id": "T6_好二创是否可前瞻定义",
+      "topic": "好二创是否可前瞻定义",
+      "pos_roles": [
+        "Future Self（6个月后维护autoclip的我）"
+      ],
+      "neg_roles": [
+        "Devil's Advocate"
+      ],
+      "type": "explicit"
+    },
+    {
+      "topic_id": "T5_好二创核心是人格还是钩子",
+      "topic": "好二创核心：'人格在场/判断句' vs '独家钩子/独家信息'",
+      "pos_roles": [
+        "B站百万二创UP主",
+        "25岁重度二创消费者",
+        "Devil's Advocate"
+      ],
+      "neg_roles": [
+        "B站资深内容PM"
+      ],
+      "type": "explicit_definition_conflict"
+    }
+  ],
+  "summary": {
+    "total_topics_scanned": 6,
+    "explicit_conflicts_found": 2
+  }
+}
