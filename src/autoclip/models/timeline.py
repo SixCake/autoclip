@@ -21,9 +21,10 @@ if TYPE_CHECKING:
 class BindingMethod(str, enum.Enum):
     """How a TimelineSegment's time was determined."""
 
+    HINT_UNIFORM = "hint_uniform"  # M2a baseline: uniform split within paragraph hint window
     EVIDENCE = "evidence"  # M2b: high-confidence keyword match
     EVIDENCE_LOWCONFIDENCE = "evidence_lowconfidence"  # M2b: matched but conf < threshold
-    FALLBACK_UNIFORM = "fallback_uniform"  # M2a baseline / M2b when resolve returns None
+    FALLBACK_UNIFORM = "fallback_uniform"  # M2b when resolve returns None (fall back to paragraph hint)
 
 
 class Timeline(Base):
