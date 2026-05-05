@@ -17,7 +17,6 @@ from autoclip.prompts.style_presets.plot_summary import (
     STYLE_DESCRIPTION,
 )
 
-
 # === Prompt template ===
 
 SYSTEM_PROMPT_TEMPLATE = """你是一位 B 站头部二创解说 UP 主，擅长把原视频改写成有"二创灵魂"的解说稿。

@@ -5,7 +5,7 @@ Exports:
     LlmCallsRecorder: BaseCallbackHandler that writes each call to {job_dir}/llm_calls/.
 """
 
-from autoclip.providers.llm.factory import get_llm
 from autoclip.providers.llm.callback import LlmCallsRecorder
+from autoclip.providers.llm.factory import get_llm
 
 __all__ = ["get_llm", "LlmCallsRecorder"]

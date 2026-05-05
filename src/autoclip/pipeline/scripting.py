@@ -143,7 +143,7 @@ def _load_shots(shots_path: Path) -> list[Shot]:
         payload = json.load(f)
     raw_shots = payload.get("shots", [])
     if not raw_shots:
-        raise ScriptingError(f"shots.json contains 0 shots — Index stage produced empty output")
+        raise ScriptingError("shots.json contains 0 shots — Index stage produced empty output")
     return [
         Shot(idx=s["idx"], start_sec=float(s["start_sec"]), end_sec=float(s["end_sec"]))
         for s in raw_shots
@@ -159,7 +159,7 @@ def _load_asr(asr_path: Path) -> dict[str, Any]:
     with asr_path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
     if "sentences" not in payload:
-        raise ScriptingError(f"asr.json schema invalid: missing 'sentences' field")
+        raise ScriptingError("asr.json schema invalid: missing 'sentences' field")
     return payload
 
 

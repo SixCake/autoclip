@@ -11,11 +11,11 @@ Covers:
 """
 
 import json
-import pytest
 
+import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from autoclip.algo.narrative_ir import Character, KeyAct, PlotOutline
+from autoclip.algo.narrative_ir import PlotOutline
 from autoclip.prompts.plot_outline import build_plot_outline_messages, parse_plot_outline_response
 
 

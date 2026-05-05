@@ -13,7 +13,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # === Pydantic raw models for strict LLM output validation ===
 
 class _CharacterRaw(BaseModel):

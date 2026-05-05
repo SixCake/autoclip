@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -32,7 +31,7 @@ class LlmCallsRecorder(BaseCallbackHandler):
     ) -> None:
         """Capture request start time and messages."""
         self._run_id_to_start[run_id] = {
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "messages": [
                 {"role": msg.type if hasattr(msg, "type") else msg.__class__.__name__.lower().replace("message", ""), "content": msg.content}
                 for msg_list in messages
@@ -72,7 +71,7 @@ class LlmCallsRecorder(BaseCallbackHandler):
         except Exception as e:
             logger.warning(f"LlmCallsRecorder: failed to extract usage: {e}")
 
-        ended_at = datetime.now(timezone.utc).isoformat()
+        ended_at = datetime.now(UTC).isoformat()
         started_at_str = start_info.get("started_at", "")
         duration_sec = 0.0
         try:

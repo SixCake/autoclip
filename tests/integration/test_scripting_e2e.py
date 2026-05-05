@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from autoclip.pipeline import scripting

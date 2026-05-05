@@ -12,13 +12,12 @@ Runs:
 """
 
 import os
-import pytest
-from pathlib import Path
 
+import pytest
 from langchain_core.messages import HumanMessage
 
-from autoclip.providers.llm.factory import get_llm
 from autoclip.providers.llm.callback import LlmCallsRecorder
+from autoclip.providers.llm.factory import get_llm
 
 
 @pytest.mark.integration

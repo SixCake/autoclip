@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -18,11 +17,8 @@ from autoclip.algo.narrative_ir import (
     Character,
     KeyAct,
     PlotOutline,
-    _CharacterRaw,
-    _KeyActRaw,
     _PlotOutlineRaw,
 )
-
 
 # === Prompt template ===
 

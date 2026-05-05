@@ -8,9 +8,7 @@ Covers:
 - Callbacks are attached
 """
 
-import os
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from langchain_community.chat_models.tongyi import ChatTongyi
