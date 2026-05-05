@@ -1,4 +1,10 @@
-"""v0.8.7.3 客观评分脚本：基于 timeline.json 计算 5 维度客观分。
+"""v0.8.8 客观评分脚本（校准版）：基于 timeline.json 计算 5 维度客观分。
+
+v0.8.8 校准变更（相对 v0.8.7.3）：
+- D1: 改为评估 hook_candidates（SCRIPTING 阶段真实产物），而非 segments[0].source_start_sec
+  原因：60s 截取与 hook 拼到首段是 ASSEMBLY 阶段职责，v0.8.7 跳过 ASSEMBLY 时 D1 判据不适用
+- D5: 去掉时长偏离扣分，仅看"段数≥5 + 无空字段"
+  原因：SCRIPTING 阶段输出"故事弧 + 候选段料"，目标时长裁剪是 ASSEMBLY 职责
 
 使用方式：
     cd <repo_root>
@@ -50,14 +56,24 @@ def score_one(name: str, target_duration_sec: float = DEFAULT_TARGET_DURATION_SE
     timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
     segments = timeline.get("segments", [])
 
-    # ===== D1: 钩子前置 =====
-    first_start = segments[0]["source_start_sec"] if segments else 999.0
-    if first_start <= 3.0:
-        d1_score, d1_note = 20, f"第1段 start={first_start:.1f}s ≤ 3s ✅"
-    elif first_start <= 10.0:
-        d1_score, d1_note = 12, f"第1段 start={first_start:.1f}s 在 3-10s（部分前置）"
+    # ===== D1: 钩子质量（v0.8.8 校准版）=====
+    # 原判据：segments[0].source_start_sec ≤ 3s（跳过 ASSEMBLY 时不适用，ASSEMBLY 才负责 hook 拼首段）
+    # 新判据：hook_candidates 含 ≥3 个 score≥0.7 的白名单钩子（SCRIPTING 阶段真实产物）
+    hook_block_for_d1 = timeline.get("hook_candidates", {})
+    candidates_for_d1 = hook_block_for_d1.get("candidates", [])
+    high_quality_hooks = [
+        c for c in candidates_for_d1
+        if c.get("score", 0) >= 0.7 and c.get("style_tag") in HOOK_WHITELIST
+    ]
+    hq_count = len(high_quality_hooks)
+    if hq_count >= 5:
+        d1_score, d1_note = 20, f"hook_candidates 含 {hq_count} 个 score≥0.7 白名单钩子 ✅"
+    elif hq_count >= 3:
+        d1_score, d1_note = 16, f"hook_candidates 含 {hq_count} 个 score≥0.7 白名单钩子（达标）"
+    elif hq_count >= 1:
+        d1_score, d1_note = 10, f"hook_candidates 仅 {hq_count} 个 score≥0.7 白名单钩子"
     else:
-        d1_score, d1_note = 5, f"第1段 start={first_start:.1f}s > 10s ❌（直接进剧情）"
+        d1_score, d1_note = 5, f"hook_candidates 无 score≥0.7 白名单钩子 ❌"
 
     # ===== D2: 判断句占比 =====
     full_text = "。".join(seg.get("sentence_text", "") for seg in segments)
@@ -102,27 +118,22 @@ def score_one(name: str, target_duration_sec: float = DEFAULT_TARGET_DURATION_SE
         d4_score = 8
         d4_note = f'命中={whitelist_count}/{len(tags)}, "其他"={fallback_count}, degraded={degraded}'
 
-    # ===== D5: 整体可发布性 =====
+    # ===== D5: 整体可发布性（v0.8.8 校准版）=====
+    # 原判据：时长偏离 >50% 扣 10 + 段数 <5 扣 5（时长裁剪是 ASSEMBLY 职责，SCRIPTING 阶段不适用）
+    # 新判据：仅看"段数≥5 + 无空字段"（SCRIPTING 阶段真实能力）
     total_duration = sum(seg.get("duration_sec", 0) for seg in segments)
-    overshoot_pct = abs(total_duration - target_duration_sec) / target_duration_sec * 100
     segment_count = len(segments)
     issues: list[str] = []
     d5_score = 20
-    if overshoot_pct > 50:
-        d5_score -= 10
-        issues.append(f"时长 {total_duration:.0f}s vs target {target_duration_sec:.0f}s 超 {overshoot_pct:.0f}%")
-    elif overshoot_pct > 20:
-        d5_score -= 5
-        issues.append(f"时长偏离 {overshoot_pct:.0f}%")
     if segment_count < 5:
-        d5_score -= 5
+        d5_score -= 10
         issues.append(f"段数={segment_count} < 5")
     for seg in segments:
         if not seg.get("sentence_text", "").strip():
-            d5_score -= 5
+            d5_score -= 10
             issues.append("存在空 sentence_text")
             break
-    d5_note = f"segs={segment_count}, total={total_duration:.0f}s, " + (
+    d5_note = f"segs={segment_count}, total={total_duration:.0f}s（参考值）, " + (
         "; ".join(issues) if issues else "所有指标达标 ✅"
     )
 

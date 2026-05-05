@@ -305,10 +305,12 @@ class TestTimelineJSONSchemaE2E:
 
         # --- top-level structure ---
         # v0.8.5: timeline.json 顶层加 hook_candidates (Q2.1=B + Q3.B=degrade)
+        # v0.8.8 P1: 加 plot_outline_degraded (non-narrative content fallback flag)
         assert set(timeline.keys()) == {
-            "plot_outline", "recommended_persona", "narrative_ir",
+            "plot_outline", "plot_outline_degraded", "recommended_persona", "narrative_ir",
             "hook_candidates", "binding_stats", "segments",
         }
+        assert timeline["plot_outline_degraded"] is False  # happy path: normal narrative content
 
         # --- recommended_persona schema (v0.8.4 Q3=B) ---
         rp = timeline["recommended_persona"]

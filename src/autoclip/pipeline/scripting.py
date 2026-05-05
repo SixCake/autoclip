@@ -56,7 +56,7 @@ from autoclip.algo.hook_generator import (
     HookCandidatesResult,
     generate_hook_candidates,
 )
-from autoclip.algo.narrative_ir import NarrativeIR, PlotOutline
+from autoclip.algo.narrative_ir import Character, KeyAct, NarrativeIR, PlotOutline
 from autoclip.algo.persona_inferer import (
     PersonaInferenceResult,
     extract_reference_lines,
@@ -128,7 +128,13 @@ class NarrativeIRTooLargeError(ScriptingError):
 
 
 class PlotOutlineError(ScriptingError):
-    """K8: plot_outline LLM/parse failed terminally; stage→FAILED, no fallback (Q6=A)."""
+    """K8: plot_outline LLM/parse failed terminally.
+
+    v0.8.8 P1: non-narrative content (kids songs / pure AMV) triggers fallback mode
+    instead of hard FAILED. Fallback builds a degraded PlotOutline from plot_summary
+    so the pipeline can continue producing a timeline with hook_candidates as the
+    primary output.
+    """
 
 
 class NarrativeIRError(ScriptingError):
@@ -329,19 +335,51 @@ def run_scripting(job_dir: Path) -> None:
         max_tokens=PLOT_OUTLINE_MAX_TOKENS,
     )
     plot_messages = build_plot_outline_messages(full_text, video_duration_sec)
-    plot_outline: PlotOutline = _invoke_llm_with_repair(
-        plot_llm,
-        plot_messages,
-        parse_plot_outline_response,
-        PlotOutlineError,
-        "plot_outline",
-    )
+    plot_outline_degraded = False
+    try:
+        plot_outline: PlotOutline = _invoke_llm_with_repair(
+            plot_llm,
+            plot_messages,
+            parse_plot_outline_response,
+            PlotOutlineError,
+            "plot_outline",
+        )
+    except PlotOutlineError as plot_err:
+        # v0.8.8 P1: Non-narrative content (kids songs / pure AMV / music compilations) cannot
+        # produce ≥3 key_acts required by schema. Instead of hard failing, degrade gracefully:
+        # build a PlotOutline with a single virtual act covering the full video duration,
+        # so downstream narrative_ir + hook_generator can still run and produce a usable timeline.
+        # The timeline.json will be marked with plot_outline_degraded=true for human review.
+        logger.warning(
+            "[scripting] plot_outline DEGRADED (non-narrative content): {} — "
+            "building fallback PlotOutline with 1 virtual act",
+            plot_err,
+        )
+        plot_outline = PlotOutline(
+            title_guess="（非叙事题材）",
+            genre="非叙事",
+            main_characters=[],
+            plot_summary=full_text[:200] if len(full_text) > 200 else full_text,
+            key_acts=[
+                KeyAct(
+                    act_idx=1,
+                    name="全片内容",
+                    approx_start_sec=0.0,
+                    approx_end_sec=video_duration_sec,
+                    summary="（非叙事题材降级处理，由 hook_candidates 兜底钩子质量）",
+                    involved_characters=[],
+                )
+            ],
+        )
+        plot_outline_degraded = True
+
     state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.30)
     logger.info(
-        "[scripting] plot_outline DONE: title={!r} n_chars={} n_acts={}",
+        "[scripting] plot_outline DONE: title={!r} n_chars={} n_acts={} degraded={}",
         plot_outline.title_guess,
         len(plot_outline.main_characters),
         len(plot_outline.key_acts),
+        plot_outline_degraded,
     )
 
     # --- Step 2.5: persona inference (v0.8.4 — Stage1 LLM for persona recommendation) ---
@@ -459,6 +497,10 @@ def run_scripting(job_dir: Path) -> None:
     total_chars = sum(len(seg.sentence_text) for seg in binding_result.segments) or 1
     timeline_payload = {
         "plot_outline": plot_outline.to_dict(),
+        # v0.8.8 P1: True when plot_outline LLM failed (non-narrative content); pipeline
+        # continued with a degraded 1-act fallback outline. hook_candidates is the primary
+        # output in this case. False (default) means normal narrative content.
+        "plot_outline_degraded": plot_outline_degraded,
         # v0.8.4 Q3=B: 完整 dataclass dump (persona_id + confidence + reasoning) for v0.8.7
         # 跑批人工 review 时可定位"为什么选了这个 persona"。v0.8.6 schema 扩展直接复用此字段。
         "recommended_persona": {

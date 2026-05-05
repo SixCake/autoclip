@@ -358,24 +358,38 @@ class TestK7InputGate:
 
 
 class TestK8HardFailure:
-    def test_plot_outline_unrepairable_raises_PlotOutlineError(self, tmp_path, monkeypatch):
-        """Unrepairable plot_outline JSON → PlotOutlineError after retries (no fallback)."""
+    def test_plot_outline_unrepairable_degrades_to_fallback(self, tmp_path, monkeypatch):
+        """v0.8.8 P1: Unrepairable plot_outline JSON → fallback PlotOutline (degraded=True).
+
+        Non-narrative content (kids songs / pure AMV) cannot produce ≥3 key_acts.
+        Pipeline now degrades gracefully instead of hard failing, so hook_candidates
+        can still provide useful output. timeline.json is written with
+        plot_outline_degraded=True.
+        """
         job_dir = tmp_path / "job_k8a"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
 
-        # Return garbage 3 times (matches max_attempts=3 in retry decorator)
-        fake_llm = _make_fake_llm(["not json at all"] * 3)
+        # plot_outline: 3 garbage responses → retry exhausted → fallback triggered
+        # persona + narrative_ir + hook: normal valid responses so pipeline runs to end
+        fake_llm = _make_fake_llm(
+            ["not json at all"] * 3
+            + [VALID_PERSONA_JSON, VALID_NARRATIVE_IR_JSON, VALID_HOOK_CANDIDATES_JSON]
+        )
         monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
-
-        # Speed up retry: monkeypatch time.sleep
         monkeypatch.setattr("autoclip.utils.retry.time.sleep", lambda s: None)
 
-        with pytest.raises(PlotOutlineError, match="terminally failed"):
-            run_scripting(job_dir)
+        # Should NOT raise — fallback path produces timeline.json
+        run_scripting(job_dir)
+
+        timeline = json.loads((job_dir / "timeline.json").read_text(encoding="utf-8"))
+        assert timeline["plot_outline_degraded"] is True
+        assert timeline["plot_outline"]["genre"] == "非叙事"
+        assert len(timeline["plot_outline"]["key_acts"]) == 1
+        assert timeline["plot_outline"]["key_acts"][0]["act_idx"] == 1
 
     def test_narrative_ir_unrepairable_raises_NarrativeIRError(self, tmp_path, monkeypatch):
-        """Plot outline OK but narrative_ir unrepairable → NarrativeIRError."""
+        """Plot outline OK but narrative_ir unrepairable → NarrativeIRError (K8 still applies)."""
         job_dir = tmp_path / "job_k8b"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
