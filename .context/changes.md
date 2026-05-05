@@ -983,3 +983,28 @@ User in pre-M1.5 phase:
 
 ### 下一步
 M2a.2 Plot Outline prompt 实现。
+
+
+---
+
+## 2026-05-05 — Session 13: M2a.2 Plot Outline prompt 实现完成
+
+### 触发
+用户输入 "继续"，进入 M2a.2 编码。
+
+### 实施过程
+1. **prompts/plot_outline.py**: build_plot_outline_messages() + parse_plot_outline_response() 支持 fence
+2. **algo/narrative_ir.py**: Character/KeyAct/PlotOutline dataclass + Pydantic _CharacterRaw/_KeyActRaw/_PlotOutlineRaw 校验层
+3. **tests/unit/test_plot_outline_prompt.py**: 9 用例全部通过 (valid JSON/fence/schema mismatch/Character往返/involved_characters一致性/main_characters空degrade)
+
+### 关键产出
+- `parse_plot_outline_response()`: fence 正则 `^```(?:json)?\s*(.*?)\s*```$` DOTALL; Pydantic 校验后做 involved_characters 引用一致性检查; main_characters 为空时 degrade 为 [] 不抛错
+- `Character`: role/name/description 结构化角色卡; `KeyAct`: act_idx 1-5 + time window + involved_characters list[str]; `PlotOutline`: title_guess/genre/main_characters/plot_summary/key_acts
+- 单元测试 9/9 覆盖: build_messages 2 + parse 7
+
+### Commit
+- `✨feat : M2a.2 implementation — Plot Outline prompt builder + parser + 9 unit tests (9/9 passed)`
+- pytest: 203 passed + 6 skipped (194 原有 + 9 新增)
+
+### 下一步
+M2a.3 Narrative IR data model + plot_summary style prompt.

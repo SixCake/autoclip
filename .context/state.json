@@ -2,7 +2,7 @@
   "project": "autoclip",
   "version": "0.8.0-executing",
   "stage": "executing",
-  "phase": "M2a.1-implementation-COMPLETE (LangChain factory + callback + 9 unit tests passed; next: M2a.2 Plot Outline prompt)",
+  "phase": "M2a.2-implementation-COMPLETE (Plot Outline prompt + parser + 9 unit tests passed; next: M2a.3 Narrative IR data model)",
   "current_focus": "M1.8 done (Index stage handler — shot detector + ASR + audio.wav cleanup K9; +31 unit tests + 2 integration tests; main commit 7a74d10 + 6 self-check rounds fe38cbf→ba03849→0b83337→08a664a→1285acd hardening dead code, contract drift with state.py, self-introduced regression revert, observability for empty ASR; HEAD 1285acd; LIM#8 deferred to M2a kickoff for runner.py Protocol docstring drift); M1 milestone 8/8 complete; next is M1 e2e acceptance (curl POST /api/jobs 5min clip → ingest+index DONE in <2min) then M2a kickoff",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2282,

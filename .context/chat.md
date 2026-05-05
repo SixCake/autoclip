@@ -690,3 +690,33 @@ M2a.2 Plot Outline prompt 实现 (预计 1d): 创建 prompts/plot_outline.py + C
 
 ### 元教训
 **LangChain 属性名陷阱**: ChatOpenAI 的 base_url 实际存储在 openai_api_base 属性，ChatTongyi 的 model 存储在 model_name。写测试前必须先用 `dir()` 或官方文档确认属性名，不能凭直觉猜。
+
+
+---
+
+## Session 13 (2026-05-05) — M2a.2 Plot Outline prompt 实现完成 (Character/KeyAct/PlotOutline + Pydantic + fence parser)
+
+### 触发
+用户输入 "继续"，进入 M2a.2 编码阶段。
+
+### 实施过程
+1. **m2a2-1**: 创建 `src/autoclip/prompts/plot_outline.py` (174 行)
+   - `build_plot_outline_messages(asr_text, duration_sec)`: SystemMessage + HumanMessage, ASR 截断至 30k chars
+   - `parse_plot_outline_response(raw)`: 支持 markdown fence 剥离 (`^```(?:json)?\s*(.*?)\s*```$` DOTALL), Pydantic `_PlotOutlineRaw` 校验, involved_characters 引用一致性检查, main_characters 为空 degrade 不抛错
+2. **m2a2-2**: 创建 `src/autoclip/algo/narrative_ir.py` (96 行)
+   - Pydantic raw models: `_CharacterRaw` / `_KeyActRaw` / `_PlotOutlineRaw` (严格 schema 校验)
+   - Dataclass models: `Character(role, name?, description)` / `KeyAct(act_idx, name, approx_start_sec, approx_end_sec, summary, involved_characters)` / `PlotOutline(title_guess, genre, main_characters, plot_summary, key_acts)`
+   - `__post_init__` 校验: KeyAct act_idx 1-5, time window 合法性
+3. **m2a2-3**: 创建 `tests/unit/test_plot_outline_prompt.py` (161 行, 9 用例)
+   - build_messages: includes ASR+duration / truncates long ASR
+   - parse: valid JSON / markdown fence / plain fence / schema mismatch raises / Character round-trip / involved_characters consistency check / main_characters empty degrade
+   - 首轮 8 passed / 1 failed (test_involved_characters_consistency_check 只给 1 key_act 触发 Pydantic min_length=3 先于自定义检查)
+   - 修复后 9/9 passed in 0.05s
+
+### Commit
+- `✨feat : M2a.2 implementation — Plot Outline prompt builder + parser + 9 unit tests (9/9 passed)`
+- 改动: prompts/{__init__,plot_outline}.py (2 new) + algo/narrative_ir.py (1 new) + tests/unit/test_plot_outline_prompt.py (1 new)
+- pytest: 194+9=203 passed + 6 skipped (last green at a35e646 was 194 passed)
+
+### 下一步
+M2a.3 Narrative IR data model + plot_summary style prompt (预计 1d): 定义 NarrativeSentence/NarrativeParagraph/NarrativeIR 三层结构 + plot_summary f-string prompt + style_presets/plot_summary.py few-shot example.
