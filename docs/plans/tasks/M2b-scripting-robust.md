@@ -12,6 +12,7 @@
 - [ ] evidence 召回率 **K2 ≥ 80%**（LLM 输出非空 evidence_keywords 的比例）
 - [ ] fallback 触发率 **K3 ≤ 30%**（resolve 返回 None 的比例）
 - [ ] 单元测试覆盖 time_resolver / 升级版 binder / 约束逻辑共 ≥ 15 个用例
+- [ ] **v0.6 修订承接（responsibility passthrough）**：M2a v0.6 引入的 timeline.json `target_duration_sec_estimate` 字段在 M2b 阶段**继续保留为预估**（M2b 不动 estimate→真值的回填），真正回填责任在 **M3.2 TTS 实跑**——本 milestone 仅需保证 binder_with_evidence 升级**不破坏** estimate 字段的字数加权计算（即 M2b.3 binder 升级时同步在序列化层保留 estimate 计算逻辑，不要回归到只有 source_*_sec 的 timeline.json）
 
 ## 📊 关联 KPI
 - **K1**（绑定准确率 ≥ 70%）— P0 KPI，本里程碑核心目标
@@ -220,6 +221,12 @@
   - 强化 evidence_keywords 要求：必须 2-4 个，必须是 ASR 中可能出现的具体词语（不接受抽象概念）
   - few-shot 扩展到 3 个例子覆盖 3 类作品：电影 / 电视剧 / 动漫
   - 段落 approx_source_*_sec 必须严格落在视频范围内（增加约束语句）
+  - **v0.6 修订（adhoc self-review, 2026-05-05）— 加回 evidence_keywords prompt 输出要求**：
+    - **背景**：M2a v0.6 修订把 evidence_keywords 从 narrative_ir prompt 删除（因 M2a baseline 不消费、是 dead data）；M2b.5 prompt v2 必须**重新加回** schema + 指令，作为 M2b.1 (BM25) + M2b.2 (time_resolver) 的输入
+    - **prompt 改动点**：`prompts/narrative_ir.py` 的 `SYSTEM_PROMPT_TEMPLATE` schema 块加回 `"evidence_keywords": [string]` 字段；"关键约束" 加回第 2 条 "evidence_keywords 是从 ASR 文本中提取的关键词，用于反向校验镜头"；强化措辞同上述"必须 2-4 个 / 必须是 ASR 中可能出现的具体词语"
+    - **代码改动量**：~5 行 prompt 文本（恰好 v0.6 在 M2a 删除的那部分），无新增模块；NarrativeSentence dataclass / parse 逻辑 / Pydantic raw model 全部不动（M2a v0.6 已保留 default_factory=list，本次只是从 LLM 端开始填值）
+    - **测试影响**：M2b.1 / M2b.2 单元测试用例的 `NarrativeSentence(evidence_keywords=[...])` mock 数据可以不再用 placeholder 空列表
+    - **token 预算回升**：v0.6 修订 1 删除 evidence 后输出系数从 120 → 80；M2b.5 加回后系数应回升至 ~120；`narrative_ir_max_tokens` 计算公式同步更新（`target_sentences * 120 + 1000`，新增 v0.6 修订项写在 M2b.5 实现 task 备注）
 - **Few-shot 例子文件结构**:
   - `prompts/style_presets/plot_summary.py` 新增 `FEW_SHOT_EXAMPLES: list[dict]`
   - 每个例子含 `genre / asr_excerpt / expected_ir_json`
@@ -252,6 +259,12 @@
 - [ ] 3 部短片的 K3 平均 ≤ 30%
 - [ ] 总控文档 KPI 表已更新
 - [ ] timeline.json 含 `binder_version` 字段
+- [ ] **v0.6 新增**：narrative_ir prompt 加回 evidence_keywords schema + 指令；`narrative_ir_max_tokens` 计算公式系数从 80 回升至 120（与 M2a v0.6 修订 1 的双闸门公式同步）
+
+**v0.6 修订附注（adhoc self-review, 2026-05-05）— evidence_keywords 责任承接**：
+- M2a v0.6 修订 3 把 evidence_keywords 从 M2a prompt 删除（dead data 治理），本 task 是配套的"加回点"——M2b.5 实现时必须先恢复 prompt 输出要求，否则 M2b.1 / M2b.2 拿到的 `NarrativeSentence.evidence_keywords` 全是空列表，BM25 + time_resolver 整链路失效
+- 实施顺序约束：M2b.5 prompt v2 改写**必须早于** M2b.1 / M2b.2 的集成测试（否则集成测试用 v1 prompt 跑出空 evidence，KPI 永远拿不到目标）
+- 代码改动点收敛：`prompts/narrative_ir.py` SYSTEM_PROMPT_TEMPLATE schema 块加回 1 行 `"evidence_keywords": [string]` + 关键约束区加回 1 行说明 + `_invoke_llm_with_repair` 的 max_tokens 系数从 80 → 120（与 M2a `scripting.py` 双闸门公式同处更新）
 
 **关联 KPI**: K1, K2, K3 全部目标值达成 — **本 milestone 的核心验收门禁**
 **依赖**: M2b.4 → **阻塞**: M3 全部

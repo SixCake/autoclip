@@ -42,8 +42,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是一位影视剧情解说稿生成专家。
       "sentences": [
         {{
           "sentence_idx": integer,
-          "text": string,
-          "evidence_keywords": [string]
+          "text": string
         }}
       ]
     }}
@@ -52,9 +51,8 @@ SYSTEM_PROMPT_TEMPLATE = """你是一位影视剧情解说稿生成专家。
 
 关键约束：
 1. approx_source_start_sec / approx_source_end_sec 是段落级的粗时间窗口，不必精确到秒。
-2. evidence_keywords 是从 ASR 文本中提取的关键词，用于 M2b 阶段的镜头反向校验。
-3. 每个 paragraph 包含 2-5 个 sentences。
-4. 总 paragraphs 数量不限，但总 sentences 数应符合 N ± 5 约束。
+2. 每个 paragraph 包含 2-5 个 sentences。
+3. 总 paragraphs 数量不限，但总 sentences 数应符合 N ± 5 约束。
 """
 
 USER_PROMPT_TEMPLATE = """剧情大纲：

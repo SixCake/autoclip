@@ -13,16 +13,16 @@ Responsibilities:
 5. Naive greedy binding (M2a.5 bind_naively).
 6. Serialize timeline.json.
 
-Progress milestones (K10 — 8 fine-grained):
+Progress milestones (K10 v0.6 — 4 收敛):
 - 0.05  handler entry, files loaded
-- 0.10  plot_outline LLM call START (sending request)
-- 0.25  plot_outline LLM call DONE (response + parsed)
-- 0.30  narrative_ir LLM call START
-- 0.60  narrative_ir LLM call DONE
-- 0.65  JSON repair chain done (recorded as separate milestone whether or not triggered)
-- 0.80  binding START
+- 0.30  plot_outline LLM call DONE (response + parsed)
+- 0.65  narrative_ir LLM call DONE (response + parsed; JSON repair if any)
 - 0.95  binding DONE
-- 1.00  timeline.json written (DONE marked at end)
+- 1.00  DONE (set automatically by mark_stage(DONE) at end)
+
+v0.6 修订: 进度从 8 数值收敛到 4 (删 START 拆分 + 删 0.65 dead milestone).
+原 8 数值在 90min 视频 Scripting ~2.5min 下平均节点 18s, START/DONE 拆分对前端体验
+几乎无差别. K10 契约弱化: progress 单调递增 + 至少含上述 4 个数值 + DONE=1.0.
 
 Contract with PipelineRunner (per runner.py `_stage_entrypoint`):
 - We do NOT wrap the body in try/except — entrypoint already catches and marks FAILED.
@@ -32,10 +32,12 @@ Contract with PipelineRunner (per runner.py `_stage_entrypoint`):
 
 K-clause contracts (M2a brainstorming v0.5 落地):
 - K3: every LLM.invoke() goes through LlmCallsRecorder callback → llm_calls/scripting_*.json
-- K7: estimate_tokens(timestamped_text) > 32000 → raise NarrativeIRTooLargeError
+- K7 (v0.6 双闸门): 输入 estimate_tokens(timestamped_text) > INPUT_TOKEN_BUDGET_K7 (90000)
+       → raise NarrativeIRTooLargeError; 输出 narrative_ir max_tokens 按 target_sentences
+       动态算 (calc_narrative_ir_max_tokens) 防 600s 档位 100% 失败
 - K8: plot_outline / narrative_ir final failure → raise *Error (NO graceful fallback)
 - K9: llm_calls/ written here; cleanup deferred to M3.6 (not this task)
-- K10: 8 progress milestones strictly ordered, verified by unit test
+- K10 (v0.6 收敛): 4 progress milestones (0.05/0.30/0.65/0.95) 单调递增, 末次 DONE=1.0
 """
 
 from __future__ import annotations
@@ -62,7 +64,11 @@ from autoclip.prompts.plot_outline import (
 from autoclip.providers.llm import LlmCallsRecorder, get_llm
 from autoclip.utils.json_repair import RepairFailedError, try_repair_json
 from autoclip.utils.retry import retry_with_repair
-from autoclip.utils.tokens import estimate_tokens
+from autoclip.utils.tokens import (
+    INPUT_TOKEN_BUDGET_K7,
+    calc_narrative_ir_max_tokens,
+    estimate_tokens,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -73,14 +79,15 @@ ASR_FILENAME = "asr.json"
 TIMELINE_FILENAME = "timeline.json"
 STAGE_NAME = "scripting"  # used by LlmCallsRecorder filename prefix
 
-# K7 entry budget (tokens). >2h video typically blows this; M2b/M3 will sharded.
-TOKEN_BUDGET_K7 = 32000
+# K7 (v0.6 双闸门): 输入闸门常量已迁至 utils/tokens.INPUT_TOKEN_BUDGET_K7 (90000);
+# 输出闸门 narrative_ir max_tokens 改为按 target_sentences 动态算
+# (calc_narrative_ir_max_tokens), 不再硬编码于此.
 
 # Default plot_outline + narrative_ir LLM tuning (per design.md §8 / brainstorming Q3)
 PLOT_OUTLINE_TEMPERATURE = 0.3
 PLOT_OUTLINE_MAX_TOKENS = 2000
 NARRATIVE_IR_TEMPERATURE = 0.7
-NARRATIVE_IR_MAX_TOKENS = 8000
+# NARRATIVE_IR_MAX_TOKENS 删除 (v0.6) - 改为运行期 calc_narrative_ir_max_tokens(target_sentences)
 
 # JSON dump style (match shots.json / asr.json / state.json)
 _JSON_DUMP_KWARGS: dict[str, Any] = {
@@ -285,21 +292,21 @@ def run_scripting(job_dir: Path) -> None:
     )
     state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.05)
 
-    # --- K7 entry check ---
+    # --- K7 输入闸门 check (v0.6: 32000 → 90000) ---
     est_tokens = estimate_tokens(timestamped_text)
-    if est_tokens > TOKEN_BUDGET_K7:
+    if est_tokens > INPUT_TOKEN_BUDGET_K7:
         raise NarrativeIRTooLargeError(
-            f"input exceeds {TOKEN_BUDGET_K7} token budget "
-            f"(estimated {est_tokens} tokens); >2h video not supported in M2a"
+            f"input exceeds {INPUT_TOKEN_BUDGET_K7} token budget "
+            f"(estimated {est_tokens} tokens); >4h video not supported in M2a"
         )
-    logger.info("[scripting] K7 check OK: estimated {} tokens", est_tokens)
+    logger.info("[scripting] K7 input gate OK: estimated {} tokens (budget {})",
+                est_tokens, INPUT_TOKEN_BUDGET_K7)
 
     # --- Step 1: instantiate callback recorder (K3) ---
     recorder = LlmCallsRecorder(job_dir, stage=STAGE_NAME)
 
-    # --- Step 2: plot_outline LLM call ---
+    # --- Step 2: plot_outline LLM call (v0.6: 删 0.10 START, 仅留 0.30 DONE) ---
     _check_cancel(state, "plot_outline_llm")
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.10)
     logger.info("[scripting] plot_outline LLM call START")
 
     plot_llm = get_llm(
@@ -316,7 +323,7 @@ def run_scripting(job_dir: Path) -> None:
         PlotOutlineError,
         "plot_outline",
     )
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.25)
+    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.30)
     logger.info(
         "[scripting] plot_outline DONE: title={!r} n_chars={} n_acts={}",
         plot_outline.title_guess,
@@ -324,16 +331,21 @@ def run_scripting(job_dir: Path) -> None:
         len(plot_outline.key_acts),
     )
 
-    # --- Step 3: narrative_ir LLM call ---
+    # --- Step 3: narrative_ir LLM call (v0.6: 删 0.30 START + max_tokens 动态算) ---
     _check_cancel(state, "narrative_ir_llm")
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.30)
-    logger.info("[scripting] narrative_ir LLM call START")
+    # K7 输出闸门: max_tokens 按 target_sentences 动态算 (修复 600s 档位 100% 失败)
+    target_sentences = int(target_duration_sec / 6)
+    ir_max_tokens = calc_narrative_ir_max_tokens(target_sentences)
+    logger.info(
+        "[scripting] narrative_ir LLM call START (target_sentences={} max_tokens={})",
+        target_sentences, ir_max_tokens,
+    )
 
     ir_llm = get_llm(
         json_mode=True,
         callbacks=[recorder],
         temperature=NARRATIVE_IR_TEMPERATURE,
-        max_tokens=NARRATIVE_IR_MAX_TOKENS,
+        max_tokens=ir_max_tokens,
     )
     ir_messages = build_narrative_ir_messages(
         plot_outline.to_dict(), timestamped_text, float(target_duration_sec)
@@ -345,19 +357,17 @@ def run_scripting(job_dir: Path) -> None:
         NarrativeIRError,
         "narrative_ir",
     )
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.60)
+    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.65)
     logger.info(
         "[scripting] narrative_ir DONE: n_paragraphs={} n_sentences={}",
         len(narrative_ir.paragraphs),
         narrative_ir.total_sentences(),
     )
 
-    # --- Step 4: JSON repair chain milestone (recorded regardless of triggered) ---
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.65)
-
-    # --- Step 5: greedy binding (M2a.5) ---
+    # --- Step 4: greedy binding (M2a.5) ---
+    # v0.6: 删除独立的 0.65 "JSON repair done" 里程碑 (dead milestone, 已并入 narrative_ir DONE);
+    # 删除 0.80 binding START 节点 (与 0.95 DONE 间隔太短, 用户感知不到).
     _check_cancel(state, "binding")
-    state.mark_stage(Stage.SCRIPT, StageStatus.RUNNING, progress=0.80)
     logger.info("[scripting] binding START: n_sentences={} n_shots={}",
                 narrative_ir.total_sentences(), len(shots))
 
@@ -370,7 +380,10 @@ def run_scripting(job_dir: Path) -> None:
         binding_result.fallback_ratio,
     )
 
-    # --- Step 6: serialize timeline.json (progress 1.0 via DONE) ---
+    # --- Step 5: serialize timeline.json (v0.6: 加 target_duration_sec_estimate 字段) ---
+    # 字数加权预估目标播放时长 (M3.2 TTS 实跑后回填真值改名 target_duration_sec).
+    # 不污染 BoundSegment dataclass — algo 层不感知"目标时长"产品概念.
+    total_chars = sum(len(seg.sentence_text) for seg in binding_result.segments) or 1
     timeline_payload = {
         "plot_outline": plot_outline.to_dict(),
         "narrative_ir": narrative_ir.to_dict(),
@@ -390,6 +403,9 @@ def run_scripting(job_dir: Path) -> None:
                 "duration_sec": seg.duration_sec,
                 "source_shot_ids": list(seg.source_shot_ids),
                 "binding_method": seg.binding_method.value,
+                "target_duration_sec_estimate": (
+                    len(seg.sentence_text) / total_chars * target_duration_sec
+                ),
             }
             for idx, seg in enumerate(binding_result.segments)
         ],
@@ -398,7 +414,7 @@ def run_scripting(job_dir: Path) -> None:
     logger.info("[scripting] timeline.json written: n_segments={}",
                 len(timeline_payload["segments"]))
 
-    # --- Step 7: mark DONE (progress=1.0 set automatically) ---
+    # --- Step 6: mark DONE (progress=1.0 set automatically; v0.6: 仅 4 个 RUNNING 数值 0.05/0.30/0.65/0.95) ---
     state.mark_stage(Stage.SCRIPT, StageStatus.DONE)
     logger.info("[scripting] DONE job_dir={}", job_dir)
 

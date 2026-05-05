@@ -42,7 +42,8 @@
 - [ ] 对 M1 跑通的 1 部短片，触发 Scripting stage 后产出 `timeline.json`
 - [ ] timeline.json 结构正确（plot_outline + narrative_ir + binding_stats + segments）
 - [ ] 每个 segment 都关联到至少 1 个 shot id
-- [ ] 肉眼检查：50% 以上句子的镜头匹配是合理的
+- [ ] 肉眼检查：50% 以上句子的**段落级 source_shot 匹配方向**是合理的（**v0.6 措辞收紧**：M2a baseline 仅做 paragraph 均分；句级精确匹配由 M2b evidence 反向校验交付，K1/K2/K3 产品 KPI 由 M2b 验收）
+- [ ] **v0.6 新增**：timeline.json 每个 segment 含 `target_duration_sec_estimate` 字段（按字数加权预估），**总和与 `state.target_duration_sec` 误差 ≤ 5%**；真实 target 时长由 M3.2 TTS 实跑后回填，**M2a 不验出片时长准确性**
 - [ ] LLM 调用失败时有 retry 3 次 + JSON repair 兜底
 - [ ] **DeepSeek 主路径 + dashscope 兜底路径**双引擎冒烟测试均通过（B2-B 决策）
 - [ ] **每次 LLM 调用落盘到 `{job_dir}/llm_calls/{stage}_{seq}.json`**（Q4 决策，K3 验收点）
@@ -190,6 +191,13 @@
 - **为什么不让 LLM 直接输出绝对时间区间**:
   - LLM 容易幻觉具体时间数字（实测错误率 30-50%）
   - 改让 LLM 输出"段落级粗时间窗口 + 句级 evidence_keywords"，由 M2b 的 time_resolver 反向校验
+- **v0.6 修订（adhoc self-review, 2026-05-05）— evidence_keywords 在 M2a 是 dead data，prompt 删除**:
+  - **症状**：M2a baseline `bind_naively` 完全不消费 evidence_keywords（plan §M2a.5 "不做的事" 第 1 条已说明），但 v0.5 prompt 仍要求 LLM 输出每句 2-5 个关键词
+  - **判定**：按 "Minimum code that solves the problem. Nothing speculative." 规则，让 LLM 生成谁都不读的字段属于典型 speculative work，浪费 ~15-25% 输出 tokens（每句 ~120 token → ~80 token）
+  - **决策**：M2a 的 narrative_ir prompt **删除 evidence_keywords schema + 指令**；`NarrativeSentence.evidence_keywords` 字段保留 `default_factory=list` 不动（schema 稳定，M2b 切换零迁移）；解析层填充空列表
+  - **回填责任**：M2b.4 prompt v2 重新加回 evidence_keywords 输出要求（详见 M2b-scripting-robust.md §M2b.4 v0.6 修订）
+  - **关联**：本修订与 §M2a.6 v0.6 修订（双闸门 + 动态 max_tokens）配套；删 evidence 后输出 token 预估系数从 120 → 80，narrative_ir_max_tokens 公式同步收紧
+  - **不变**：dataclass 字段 / Pydantic raw model / parse 逻辑 / timeline.json schema 全部不动；唯一改动点是 `prompts/narrative_ir.py` 的 SYSTEM_PROMPT_TEMPLATE schema 块和 "关键约束" 第 2 条
 - **plot_summary 风格预设**:
   - 第三人称客观叙述，避免主观评论
   - 单句 8-15 字（便于 TTS 朗读）
@@ -288,6 +296,14 @@
   - 不用 evidence_keywords 反向检索
   - 不做 BM25 / 字符级匹配
   - 不区分 fallback 和正常 binding（fallback_count = 0）
+- **v0.6 修订（adhoc self-review, 2026-05-05）— BoundSegment target-side 时长占位**:
+  - **症状**：当前 BoundSegment 只有 source-side 时间（`source_start_sec` / `source_end_sec` = 原片素材范围），但 MVP 出片时长由 target_duration_sec 决定；timeline.json 没有 target-side 占位会让 M3.2/M3.3 拿到"96s 原片素材"却不知该裁成几秒
+  - **决策**：M2a.6 序列化 timeline.json 时给每个 segment 增加 `target_duration_sec_estimate: float` 字段（**仅在序列化层加，不污染 BoundSegment dataclass**）
+  - **估算公式**（按字数加权）：`target_duration_sec_estimate = (len(sentence_text) / sum(len(s.sentence_text) for s in segments)) × state.target_duration_sec`
+  - **不变量**：`sum(segment.target_duration_sec_estimate for all segments) == state.target_duration_sec`（浮点累加误差 < 0.01s）
+  - **回填责任**：M3.2 TTS 实跑后，把每个 segment 的 `target_duration_sec_estimate` 替换成 `target_duration_sec`（实测值），estimate 字段保留为 audit；详见 M2b/M3 plan 对应 task v0.6 修订
+  - **为什么不进 BoundSegment dataclass**：`bind_naively` 是纯算法层，不该感知"目标时长"这个产品概念；用 `_estimate` 后缀明示"占位、会被改写"，避免和 M3 修正后的真实值混淆
+  - **关联**：本修订与 §M2a.6 v0.6 修订（timeline.json schema 加 estimate 字段）配套；M2a.5 算法层零改动
 
 **涉及文件**:
 - Create: `src/autoclip/algo/greedy_binder.py`
@@ -363,6 +379,60 @@
   - **K8** — plot_outline 解析失败（含 LLM 网络失败 / JSON 不可修复 / Pydantic 校验失败）时 raise `PlotOutlineError`，stage→FAILED；**禁止**降级到 fallback outline（**Q6=A 决策**）
   - **K9** — `{job_dir}/llm_calls/` 在 M3.6 cleanup 阶段整目录删除（与 `*.tmp` / `*.bak` 同批），不进入 final tarball；本 task 仅写入，cleanup 路径在 M3.6 task 实现
   - **K10** — handler 必须按 8 个细里程碑顺序上报进度（0.05 / 0.10 / 0.25 / 0.30 / 0.60 / 0.65 / 0.80 / 0.95 / 1.00），**Q8=B 决策**；unit test 用 `MockJobStateFile` 验证调用顺序与时机
+
+- **v0.6 修订（adhoc self-review, 2026-05-05）— 三处算法/契约缺陷收敛**：
+
+  ### 修订 1：K7 双闸门 — 输入阈值 + 输出动态 max_tokens（修复"600s 档位 100% 失败"P0 bug）
+  - **症状**：当前 K7 阈值 `> 32000` 在 M2a 是死分支（DeepSeek 128k context + ASR 截 40k 字符 ≈ 18k tokens 总输入，永远到不了）；真正会炸的是输出——`narrative_ir` 的 `max_tokens=8000` 硬编码，用户选 600s 档位（≈100 句）极可能截断 → JSON 不完整 → repair 失败 → stage FAILED；**用户选系统支持的最大档位反而 100% 失败**
+  - **决策**：K7 从单闸门（仅卡输入）升级为**双闸门**：
+    - **输入闸门**：`INPUT_TOKEN_BUDGET_K7 = 90000`（DeepSeek 128k 留 30k 给输出的安全水位），常量改名 `TOKEN_BUDGET_K7 → INPUT_TOKEN_BUDGET_K7`；阈值从 32000 → 90000
+    - **输出闸门**：`narrative_ir_max_tokens` 从硬编码 8000 改为按 target_sentences 动态算：
+      ```
+      target_sentences = int(target_duration_sec / 6)  # 已有逻辑
+      narrative_ir_max_tokens = clamp(target_sentences * 80 + 1000, 2000, 16000)
+      # 系数 80 配合 v0.6 修订 3（删 evidence_keywords，每句 token 从 ~120 降到 ~80）
+      # +1000 是 system overhead（paragraph 包裹 / topic 字段 / JSON 结构本身）
+      # clamp [2000, 16000] 防止极端档位（10s 档算出 800 tokens 不够 / 千秒级档位算出 50k 超 DeepSeek 输出上限）
+      ```
+  - **影响代码**：`scripting.py` 的 `TOKEN_BUDGET_K7` 常量改名 + 数值改 90000；`NARRATIVE_IR_MAX_TOKENS` 常量删除，改在 `_invoke_llm_with_repair` 调用前按 target_sentences 动态算；`get_llm(max_tokens=...)` 传动态值
+  - **不变**：plot_outline 的 `max_tokens=2000` 不动（输出固定 schema，不随档位变化）
+  - **测试用例补充**：原 K7 测试"构造 >32k token input 抛 NarrativeIRTooLargeError"改为"构造 >90k token input 抛错"；新增"600s 档位 narrative_ir_max_tokens 应为 8000+"和"60s 档位应为 2000"两个边界用例
+
+  ### 修订 2：timeline.json schema 加 `target_duration_sec_estimate` 字段（修复 BoundSegment target-side 时长缺失）
+  - **症状**：见 §M2a.5 v0.6 修订（timeline.json 没有目标时长占位，下游 M3.2/M3.3 拿到"96s 原片素材"却不知该裁成几秒）
+  - **决策**：M2a.6 handler 序列化 timeline.json 时每个 segment 加 `target_duration_sec_estimate: float`，按字数加权估算（公式见 §M2a.5）
+  - **timeline.json schema 变更**（segments 数组每个对象新增字段）：
+    ```
+    "segments": [{
+      ...原有字段不变...,
+      "target_duration_sec_estimate": 6.2  // 新增，按字数加权预估，M3.2 回填真值时改名 target_duration_sec
+    }]
+    ```
+  - **影响代码**：`scripting.py` 序列化层 `timeline_payload["segments"]` 列表推导式增加 1 行字段；handler 计算 `total_chars = sum(len(s.sentence_text) for s in binding_result.segments)` 后按比例算每个 segment 的 estimate
+  - **回填责任**：M3.2 TTS 实跑后改名为 `target_duration_sec`（详见 M3 plan v0.6 修订）
+
+  ### 修订 3：进度上报里程碑 8 → 4 收敛（YAGNI / 删 dead milestone）
+  - **症状**：当前 K10 契约硬编码 8 个进度数值（0.05 / 0.10 / 0.25 / 0.30 / 0.60 / 0.65 / 0.80 / 0.95 / 1.00）；其中 0.65 是"JSON repair chain done (recorded as separate milestone whether or not triggered)"——**它根本不对应任何实际工作**，只是为了凑数让"8 个里程碑"的契约成立；start/done 拆分对前端体验几乎无差别（90min 视频 Scripting 阶段 2.5min，每节点平均 18 秒）
+  - **决策**：里程碑收敛到 **4 个**：
+    - `0.05` — handler 入口、文件加载完成
+    - `0.30` — plot_outline DONE（response received + parsed）
+    - `0.65` — narrative_ir DONE（response received + parsed）
+    - `0.95` — binding DONE
+    - DONE 由 entrypoint 兜底（progress=1.0 自动写入），handler 不重复 mark
+  - **K10 契约弱化**：从"按 8 个特定数值顺序触发"改为"progress 值单调递增 + 至少包含上述 4 个数值 + DONE 时 progress=1.0"；不锁具体中间数值（未来调整颗粒度无需改契约）
+  - **删 start 拆分**：plot_outline / narrative_ir / binding 的 `start (sending)` 节点全部删除（用户感知不到 18 秒级颗粒度）
+  - **测试用例简化**：`test_scripting_handler_progress.py` 断言从"8 个特定数值顺序"改为"progress 单调递增 + 至少 4 次调用 + 末次 progress >= 0.95"；少 1 个测试文件意义上的复杂度，断言更稳
+
+  ### 修订 4：Milestone 验收措辞收紧（区分工程验收 vs 产品 KPI）
+  - **症状**：当前 Milestone 验收第 4 条"肉眼检查 50% 以上句子的镜头匹配是合理的"措辞会让人误以为 M2a 完了就达成产品 KPI K1（≥70%）；但 §M2a.5 baseline 算法明说"不做 evidence 反向校验"，K1/K2/K3 必须由 M2b 验收
+  - **决策**：Milestone 验收第 4 条改写为：**"肉眼检查 50% 以上句子的段落级 source_shot 匹配方向是合理的（M2a baseline 仅做 paragraph 均分；句级精确匹配由 M2b evidence 反向校验交付，K1/K2/K3 等产品 KPI 由 M2b 验收）"**
+  - **新增 Milestone 验收第 9 条**：**"timeline.json 每个 segment 含 `target_duration_sec_estimate` 字段，总和与 `state.target_duration_sec` 误差 ≤ 5%；真实 target 时长由 M3.2 TTS 实跑后回填，M2a 不验出片时长准确性"**
+
+  ### 修订总览（v0.6 改动量预估）
+  - 影响文件：`scripting.py`（+~15 行: K7 改名+阈值改+max_tokens 动态计算+estimate 序列化）/ `prompts/narrative_ir.py`（-~5 行: 删 evidence schema 和指令）/ `tests/unit/test_scripting_handler_progress.py`（断言简化）/ `tests/unit/test_tokens.py`（K7 阈值边界用例补充）
+  - 净代码量：约 +10 行 / -10 行（基本持平）
+  - 工时净影响：0d（属于 M2a.6 范围内的小幅微调，不延长 W2）
+  - 实施顺序约束：本 v0.6 修订必须在 M2a.6 实现进入 commit 前完成；当前 git 状态显示 `scripting.py` 已 staged 未 commit，**正好可在同一 commit 内吸收 v0.6 改动**（避免独立 commit 引入 history 噪音）
 
 **涉及文件**:
 - Create: `src/autoclip/pipeline/scripting.py`

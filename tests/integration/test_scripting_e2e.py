@@ -302,12 +302,13 @@ class TestTimelineJSONSchemaE2E:
         assert bs["fallback_count"] == 0
         assert bs["fallback_ratio"] == 0.0
 
-        # --- segments schema (per item) ---
+        # --- segments schema (per item) — v0.6: 新增 target_duration_sec_estimate 字段 ---
         assert len(timeline["segments"]) == 3
         expected_seg_keys = {
             "order_idx", "paragraph_idx", "sentence_idx", "sentence_text",
             "source_start_sec", "source_end_sec", "duration_sec",
             "source_shot_ids", "binding_method",
+            "target_duration_sec_estimate",  # v0.6: 字数加权预估目标播放时长
         }
         for i, seg in enumerate(timeline["segments"]):
             assert set(seg.keys()) == expected_seg_keys
@@ -316,6 +317,18 @@ class TestTimelineJSONSchemaE2E:
             assert isinstance(seg["source_shot_ids"], list)
             assert seg["source_end_sec"] >= seg["source_start_sec"]
             assert abs(seg["duration_sec"] - (seg["source_end_sec"] - seg["source_start_sec"])) < 1e-6
+            # v0.6: 估算字段应为正数 (字数加权后不可能为 0 或负)
+            assert seg["target_duration_sec_estimate"] > 0, \
+                f"segment {i} target_duration_sec_estimate must be > 0"
+
+        # v0.6 invariant: sum(estimate) ≈ state.target_duration_sec (字数加权后总和守恒)
+        # state.json 由 _write_minimal_inputs 写入 target_duration_sec=60 — 见 fixture
+        total_estimate = sum(s["target_duration_sec_estimate"] for s in timeline["segments"])
+        target_duration_sec = 60.0  # 与 _write_minimal_inputs fixture 对齐
+        assert abs(total_estimate - target_duration_sec) / target_duration_sec <= 0.05, (
+            f"v0.6 estimate sum invariant violation: sum={total_estimate} vs target={target_duration_sec} "
+            f"(err {abs(total_estimate - target_duration_sec) / target_duration_sec * 100:.2f}% > 5%)"
+        )
 
     def test_segments_order_matches_narrative_ir_iter_sentences(self, tmp_path, monkeypatch):
         """segments order_idx 严格按 NarrativeIR.iter_sentences() 全局顺序."""

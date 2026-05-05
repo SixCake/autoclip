@@ -1,8 +1,8 @@
 """Unit tests for scripting handler — K10 progress milestones + K7/K8 contract verification.
 
 Coverage:
-- K10 (8 progress milestones strictly ordered): 0.05 → 0.10 → 0.25 → 0.30 → 0.60 → 0.65 → 0.80 → 0.95 → DONE(=1.0)
-- K7 (input budget): timestamped_text > 32k tokens raises NarrativeIRTooLargeError
+- K10 v0.6 (4 progress milestones in correct order): 0.05 → 0.30 → 0.65 → 0.95 → DONE(=1.0)
+- K7 v0.6 (input gate): timestamped_text > 90k tokens raises NarrativeIRTooLargeError
 - K8 (hard failure): plot_outline 解析失败终态 raise PlotOutlineError; narrative_ir 失败 raise NarrativeIRError
 - Cancel checkpoint: .cancel flag mid-stage → ScriptingCancelledError
 - happy path: timeline.json 写入 + binding_method=hint_uniform + state DONE
@@ -156,8 +156,13 @@ class _MarkStageRecorder:
 
 
 class TestK10ProgressOrder:
-    def test_8_milestones_in_strict_order(self, tmp_path, monkeypatch):
-        """All 8 progress milestones must fire in strict order, ending with DONE."""
+    def test_4_milestones_in_correct_order(self, tmp_path, monkeypatch):
+        """K10 v0.6 收敛: 4 progress milestones (0.05/0.30/0.65/0.95) + DONE.
+
+        v0.6 修订: 从 8 数值收敛到 4 (删 START 拆分 + 0.65 dead milestone).
+        K10 契约弱化: progress 单调递增 + 至少含 4 个数值 + DONE=1.0
+        (不再锁具体中间数值, 未来调整颗粒度无需改契约).
+        """
         job_dir = tmp_path / "job_001"
         job_dir.mkdir()
         _write_minimal_inputs(job_dir)
@@ -182,21 +187,48 @@ class TestK10ProgressOrder:
             (status, prog) for stage, status, prog in recorder.calls if stage == "script"
         ]
 
-        # Expected sequence (RUNNING progress + final DONE)
+        # v0.6 expected sequence: 4 RUNNING progress 数值 + final DONE
         expected = [
             ("running", 0.05),
-            ("running", 0.10),
-            ("running", 0.25),
             ("running", 0.30),
-            ("running", 0.60),
             ("running", 0.65),
-            ("running", 0.80),
             ("running", 0.95),
             ("done", None),
         ]
         assert progress_calls == expected, (
-            f"K10 progress sequence mismatch:\n  expected: {expected}\n  actual:   {progress_calls}"
+            f"K10 v0.6 progress sequence mismatch:\n  expected: {expected}\n  actual:   {progress_calls}"
         )
+
+    def test_progress_at_least_4_milestones_with_done_complete(self, tmp_path, monkeypatch):
+        """K10 v0.6 弱化契约: 至少 4 次 RUNNING 调用 + 末次 progress >= 0.95 + DONE=1.0.
+
+        这是面向未来的契约 (允许颗粒度调整不破): 严格数值匹配在
+        test_4_milestones_in_correct_order 兜底; 这里只验证最低保证.
+        """
+        job_dir = tmp_path / "job_001b"
+        job_dir.mkdir()
+        _write_minimal_inputs(job_dir)
+
+        fake_llm = _make_fake_llm([VALID_PLOT_OUTLINE_JSON, VALID_NARRATIVE_IR_JSON])
+        monkeypatch.setattr(scripting, "get_llm", lambda *a, **k: fake_llm)
+
+        state = JobStateFile(job_dir)
+        recorder = _MarkStageRecorder(state.mark_stage)
+        with patch.object(JobStateFile, "mark_stage", recorder):
+            run_scripting(job_dir)
+
+        running_progress = [
+            prog for stage, status, prog in recorder.calls
+            if stage == "script" and status == "running" and prog is not None
+        ]
+        done_calls = [
+            (stage, status) for stage, status, prog in recorder.calls
+            if stage == "script" and status == "done"
+        ]
+
+        assert len(running_progress) >= 4, f"expected >= 4 RUNNING progress calls, got {len(running_progress)}"
+        assert running_progress[-1] >= 0.95, f"final RUNNING progress should be >= 0.95, got {running_progress[-1]}"
+        assert len(done_calls) == 1, f"expected exactly 1 DONE call, got {len(done_calls)}"
 
     def test_progress_values_monotonically_increase(self, tmp_path, monkeypatch):
         """All progress values must be monotonically non-decreasing."""
@@ -244,29 +276,38 @@ class TestK10ProgressOrder:
 # ---------------------------------------------------------------------------
 
 
-class TestK7TokenBudget:
-    def test_timestamped_text_above_32k_raises(self, tmp_path, monkeypatch):
-        """Input exceeding 32k token budget raises NarrativeIRTooLargeError before any LLM call."""
+class TestK7InputGate:
+    """K7 v0.6 输入闸门: 阈值 32000 → 90000."""
+
+    def test_timestamped_text_above_90k_raises(self, tmp_path, monkeypatch):
+        """Input exceeding 90k token budget raises NarrativeIRTooLargeError before any LLM call.
+
+        v0.6: 阈值从 32k 升至 90k (DeepSeek 128k context 留 30k 给输出).
+        构造 ~92k tokens 输入触发 (3000 sentences × 100 中文字符 × 0.4 ≈ 120000 但
+        per-sentence overhead 让总 token 实测约 100k+).
+        """
         job_dir = tmp_path / "job_k7"
         job_dir.mkdir()
 
-        # Build 1000 sentences with 100-char Chinese text each → ~40k tokens
-        # (1000 sentences × 100 chars × 0.4 tokens/char = 40000 tokens)
+        # Build 3000 sentences with 100-char Chinese text each
+        # 3000 * 100 chars 中文 ≈ ceil(300000/2.5) = 120000 base tokens
+        # + per-line "[xxx.xx-xxx.xx] " overhead ≈ ~17 ASCII chars/line × 3000 = 51000 chars ≈ 12750 tokens
+        # Total estimated ≈ 132750 tokens, well above 90k
         big_sentences = [
             {
                 "start_sec": float(i),
                 "end_sec": float(i + 1),
                 "text": "中" * 100,
             }
-            for i in range(1000)
+            for i in range(3000)
         ]
         (job_dir / "asr.json").write_text(
             json.dumps({"sentences": big_sentences, "language": "zh", "provider": "fake"}),
             encoding="utf-8",
         )
         (job_dir / "shots.json").write_text(
-            json.dumps({"n_shots": 1, "total_duration_sec": 1000.0, "shots": [
-                {"idx": 0, "start_sec": 0.0, "end_sec": 1000.0}
+            json.dumps({"n_shots": 1, "total_duration_sec": 3000.0, "shots": [
+                {"idx": 0, "start_sec": 0.0, "end_sec": 3000.0}
             ]}),
             encoding="utf-8",
         )
@@ -280,7 +321,7 @@ class TestK7TokenBudget:
 
         monkeypatch.setattr(scripting, "get_llm", should_not_be_called)
 
-        with pytest.raises(NarrativeIRTooLargeError, match="32000 token budget"):
+        with pytest.raises(NarrativeIRTooLargeError, match="90000 token budget"):
             run_scripting(job_dir)
 
 

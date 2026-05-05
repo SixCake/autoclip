@@ -1926,6 +1926,26 @@ class TimelineSegment:  # 新增中间层（统一概念）
 
 **迁移成本**：MVP 阶段未写代码，**纯 schema 调整，零迁移**。
 
+**v0.6 修订（adhoc self-review, 2026-05-05）— `target_duration_sec_estimate` 中间字段补充**：
+
+M2a baseline（HINT_UNIFORM 绑定）阶段，TimelineSegment 的 `target_start_sec` / `target_end_sec` / `duration_sec` 三个 target-side 字段无法直接计算（TTS 还没跑、单句实际播放时长未知）。为避免 timeline.json 在 M2a 阶段缺少 target 信息（M3.2/M3.3 拿到"96s 原片素材"却不知该裁成几秒），引入中间字段：
+
+| 阶段 | 字段 | 含义 | 计算方式 |
+|---|---|---|---|
+| **M2a baseline** | `target_duration_sec_estimate: float`（**新增中间字段，序列化层填**） | 按字数加权预估的目标播放时长占位 | `(len(sentence_text) / total_chars) × state.target_duration_sec` |
+| **M3.2 TTS 实跑后** | `target_duration_sec: float`（**真值，回填**） | TTS 实际产出的音频时长 | `librosa.get_duration(tts_wav)` 或 TTS API 返回值 |
+| **M3.3 Assembly 适配后** | `target_start_sec` / `target_end_sec`（**真值，最终值**） | 在最终成片时间线上的精确起止时刻 | 累加 + ±20% 时长适配后输出 |
+
+**字段演化不变量**：
+- M2a 阶段：`sum(seg.target_duration_sec_estimate for all segs) == state.target_duration_sec`（浮点累加误差 < 0.01s）
+- M3.2 阶段：`target_duration_sec_estimate` 字段保留为 audit（可与真值对比衡量字数加权估算偏差），不删除
+- M3.3 阶段：`target_end_sec - target_start_sec == target_duration_sec`（invariant）
+
+**为什么不在 M2a 一步到位计算 `target_duration_sec`**：
+- TTS 实际产出受语速/音色/标点影响，估算 ±5-15% 不可避免；用 `_estimate` 后缀明示"占位、会被改写"是最干净的语义
+- M2a 算法层（`bind_naively`）的 `BoundSegment` dataclass **不感知"目标时长"** 这个产品概念——`target_duration_sec_estimate` 仅在 M2a.6 序列化层补充，避免污染算法层职责
+- 详见 `docs/plans/tasks/M2a-scripting-main.md` §M2a.5 / §M2a.6 v0.6 修订段
+
 ---
 
 ### 17.5 测试策略（核心算法必须有测试）
