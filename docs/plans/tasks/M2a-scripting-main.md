@@ -1,10 +1,42 @@
 # M2a — Scripting 主链路（Week 2）
 
 > **隶属于**: [`../2026-05-04-autoclip-plan.md`](../2026-05-04-autoclip-plan.md)
-> **设计依据**: [`../2026-05-04-autoclip-design.md`](../2026-05-04-autoclip-design.md) §8 / §16.3 / §17.1
+> **设计依据**: [`../2026-05-04-autoclip-design.md`](../2026-05-04-autoclip-design.md) §8 / §16.3 / §17.1 / ADR-001（v0.5 修订）
+
+## M2a Brainstorming 决策矩阵（v0.5, 2026-05-05）
+
+> **本节由 brainstorming skill 在 M2a kickoff 时收敛产出，是 M2a.1-M2a.6 所有任务的最高约束源**；任何 task 与本节冲突时以本节为准。
+> 触发本次 brainstorming 的契机：M2a 启动前，从 v0.4 plan 沉淀的 5 个未决议题（Provider 选型 / 双引擎 / 可观测性 / 降级路径 / 进度颗粒度）。
+> 收敛过程见 chat.md「Session 10 Brainstorming Q1-Q8」段，实施约束 D1-D4 见本节末尾。
+
+| # | 议题 | 决策 | 关键约束 |
+|---|---|---|---|
+| Q1 | LLM Provider | **DeepSeek 替代 Qwen** | OpenAI 兼容协议；128k context；JSON mode |
+| Q2 | Provider 架构 | **双引擎并存** | 通过 LangChain `BaseChatModel` 抽象；DeepSeek 主用，dashscope 兜底 |
+| Q3 | API 命名 | **OpenAI 标准命名** | LangChain `ChatOpenAI`（DeepSeek base_url 注入）；不自造 wrapper |
+| Q4 | LLM 调用可观测性 | **`{job_dir}/llm_calls/` 落盘** | 每次 call 落 `{stage}_{seq}.json`（含 prompt / response / usage / cost）；用 LangChain `BaseCallbackHandler` 实现，K9 cleanup 一并删除 |
+| Q5 | target_duration / style_preset 注入 | **A+C：state.json 直读 + UI 层 fallback** | M1.4 已实现 `_JobMeta.target_duration_sec` + `style_preset`；handler 直读，**不动 state schema**；UI fallback `clamp(video_duration/10, 30, 600)` 见 M3.7 |
+| Q6 | plot_outline 失败处理 | **A：硬失败** | LLM 失败 / JSON 不可修复时 raise `PlotOutlineError`，stage→FAILED；本地无 key 走 M2b mock provider，**不引入降级路径** |
+| Q7 | narrative IR token 预算 | **A：不分片单次 call** | 入口 K7 检查：输入 token 预估 >32k 时 raise `NarrativeIRTooLargeError`；>2h 视频留给 M2b/M3 优化 |
+| Q8 | handler 进度上报颗粒度 | **B：8 个细里程碑** | 每个 LLM 阶段拆 `start (sending)` + `done (received)`；复用 M1.4 `progress` 字段，不动 schema |
+
+**深度选项**（B1-B3 = 实施深度边界）：
+- **B1=A**：LangChain 用最小化深度——只用 `BaseChatModel` + `BaseCallbackHandler`，prompt 仍用 f-string，输出仍走 M2a.4 自写 JSON repair；**故意不用** `ChatPromptTemplate` / `PydanticOutputParser` / `OutputFixingParser`，避免把"修复策略"权交给 LangChain 黑盒
+- **B2=B**：dashscope 做完整双引擎实跑验证（不只是接口预留）；M2a.1 unit test 用 `FakeListChatModel` mock 两条路径都跑通，dashscope 跑一次冒烟测试
+- **B3=A**：M2a.1 标题改写为 "LangChain 集成 + LLMFactory"，工时 1.5d→1.0d（少写自抽象层 -0.5d，实测两个 provider +0.0d 因为 LangChain 接入成本极低）
+
+**落盘约束**（D1-D4 = 文档与依赖落盘细节）：
+- **D1=B**：pyproject.toml 同时显式声明 `langchain-community` + `dashscope^1.20`（既然 B2-B 要实跑就显式锁版本，避免 langchain-community 升级时意外断开 dashscope 接入）
+- **D2=A**：LangChain 紧锁 `langchain-core>=0.3,<0.4 + langchain-openai>=0.2,<0.3 + langchain-community>=0.3,<0.4`（0.x 大版本破坏性改动多）
+- **D3=A**：本决策矩阵原地嵌入主 plan（避免文档碎片化，不新建独立 brainstorming 记录文件）
+- **D4=Y**：4 批次执行（doc-only file_replace → 验证 → commit → worktree-save 结束门禁），不跑 poetry install（留给 M2a.1 实现时跑），不跑 pytest（本批次 doc-only）
+
+**工时净变化**：5.5d → **5.3d**（M2a.1 -0.5d + B2-B dashscope 实跑 +0.3d）
+
+---
 
 ## 🎯 Milestone 目标
-搭建 LLM Provider 抽象 + 通义千问 qwen-plus 实现；端到端跑通"读 shots.json + asr.json → 输出 timeline.json"的 Scripting 流程。本里程碑只做**最简版本**——不做 evidence_keywords 反向校验，仅按 paragraph_hint 时间区间贪心分配镜头。后续 M2b 升级。
+集成 LangChain `BaseChatModel` 抽象 + DeepSeek-V3 主 provider + dashscope 兜底；端到端跑通"读 shots.json + asr.json → 输出 timeline.json"的 Scripting 流程。本里程碑只做**最简版本**——不做 evidence_keywords 反向校验，仅按 paragraph_hint 时间区间贪心分配镜头。后续 M2b 升级。
 
 ## ✅ Milestone 验收
 - [ ] 对 M1 跑通的 1 部短片，触发 Scripting stage 后产出 `timeline.json`
@@ -12,11 +44,13 @@
 - [ ] 每个 segment 都关联到至少 1 个 shot id
 - [ ] 肉眼检查：50% 以上句子的镜头匹配是合理的
 - [ ] LLM 调用失败时有 retry 3 次 + JSON repair 兜底
-- [ ] Scripting stage 端到端 ≤ 4min（90min 视频）
+- [ ] **DeepSeek 主路径 + dashscope 兜底路径**双引擎冒烟测试均通过（B2-B 决策）
+- [ ] **每次 LLM 调用落盘到 `{job_dir}/llm_calls/{stage}_{seq}.json`**（Q4 决策，K3 验收点）
+- [ ] Scripting stage 端到端 ≤ 2.5min（90min 视频，K6 部分预算）
 
 ## 📊 关联 KPI
 - **K1, K2, K3**（绑定准确率/召回率/fallback）：M2a 不做严格量化，留给 M2b 升级
-- **K6**（端到端耗时）：本 milestone Scripting 部分应 ≤ 4min/90min
+- **K6**（端到端耗时）：本 milestone Scripting 部分应 ≤ 2.5min/90min（详见 M2a.6 K6 总预算说明）
 - **K8**（单元测试覆盖率）：narrative IR 解析 / 简化绑定 / JSON repair 共 ≥ 10 个用例
 
 ## 🔗 依赖
@@ -181,6 +215,7 @@
   - 捕获所有 Exception 并记录 warning
   - 与 tenacity 互补：tenacity 用于 HTTP 层，本装饰器用于 LLM 输出解析层
 - **不引入新依赖**: 仅用 stdlib + loguru
+- **不使用 LangChain `OutputFixingParser`**（**B1=A 最小化决策**）：LangChain 的 `OutputFixingParser` 把"修复策略"权交给框架黑盒——失败时再调一次 LLM 让它修自己输出，调试成本极高且不可控。本 task 自写 `try_repair_json` 的 5 步策略（fence 剥离 / `{...}` 抽取 / trailing comma / 单引号 / 多策略候选）是确定性算法，每一步都可单元测试，且不引入额外 LLM 调用。M2b 阶段如证明此处是质量瓶颈再升级，**M2a 阶段刻意不升级**
 
 **涉及文件**:
 - Create: `src/autoclip/utils/{json_repair,retry}.py`
@@ -249,13 +284,14 @@
 **目标**: 实现 Scripting stage handler，把前 5 个 task 的产物组装成端到端流程，并注册到 PipelineRunner。
 
 **关键设计决策**:
-- **handler 流程**（design.md §8）:
-  1. 加载 shots.json + asr.json
-  2. 计算 full_text 和 timestamped_text
-  3. LLM 调用 1: plot outline（temperature=0.3, max=2000, JSON mode）
-  4. LLM 调用 2: narrative IR（temperature=0.7, max=8000, JSON mode）
-  5. 简化绑定（M2a.5）
-  6. 序列化 timeline.json
+- **handler 流程**（design.md §8，**v0.5 LangChain 改写**）:
+  1. 加载 shots.json + asr.json + state.json（取 `_JobMeta.target_duration_sec` + `style_preset`）
+  2. 计算 full_text 和 timestamped_text；**入口 K7 检查**：`estimate_tokens(timestamped_text) > 32000` 时 raise `NarrativeIRTooLargeError`
+  3. 实例化 `LlmCallsRecorder(job_dir, stage="scripting")` callback
+  4. 通过 `get_llm(json_mode=True, callbacks=[recorder], temperature=0.3, max_tokens=2000)` 拿到 plot_outline LLM；调用 `llm.invoke(plot_outline_messages)`；解析失败抛 `PlotOutlineError`（**Q6=A 硬失败**，不降级）
+  5. 通过 `get_llm(json_mode=True, callbacks=[recorder], temperature=0.7, max_tokens=8000)` 拿到 narrative_ir LLM；调用 `llm.invoke(narrative_ir_messages)`
+  6. 简化绑定（M2a.5）
+  7. 序列化 timeline.json
 - **timeline.json schema**:
   ```
   {
@@ -268,11 +304,23 @@
   }
   ```
 - **LLM 调用容错链**:
-  1. tenacity 处理 HTTP 层失败（M2a.1 已实现）
-  2. retry_with_repair 处理 JSON 解析失败（M2a.4）
-  3. parse 失败 → try_repair_json → 重 parse；仍失败抛 ValueError → retry_with_repair 再试
-- **进度上报**: 0.05 / 0.3 (plot done) / 0.7 (IR done) / 0.9 (bind done) / 1.0
-- **Cancel 检查点**: 在每次 LLM 调用前
+  1. LangChain `ChatOpenAI(max_retries=2)` 处理 HTTP 层失败（M2a.1 已实现）
+  2. M2a.4 `retry_with_repair` 装饰器处理 JSON 解析层失败（与 LangChain HTTP 重试互补）
+  3. parse 失败 → `try_repair_json` → 重 parse；仍失败抛 `ValueError` → `retry_with_repair` 再试
+  4. plot_outline 链路最终失败 → raise `PlotOutlineError`，stage→FAILED（**Q6=A 硬失败决策，不引入降级 outline**）
+  5. narrative_ir 链路最终失败 → raise `NarrativeIRError`（同样硬失败）
+- **进度上报**（**Q8=B 8 个细里程碑决策**，复用 M1.4 `progress` 字段，不动 schema）:
+  - `0.05` — handler 入口、文件加载完成
+  - `0.10` — plot_outline LLM call **start (sending request)**
+  - `0.25` — plot_outline LLM call **done (response received + parsed)**
+  - `0.30` — narrative_ir LLM call **start (sending request)**
+  - `0.60` — narrative_ir LLM call **done (response received + parsed)**
+  - `0.65` — JSON repair 链路完成（如触发 repair 则记录，未触发跳过）
+  - `0.80` — simple binding **start**
+  - `0.95` — binding **done**
+  - `1.00` — timeline.json 序列化完成（DONE 由 entrypoint 兜底，handler 不重复 mark）
+  - **K10 关联**：8 个里程碑 = M2a.6 验收硬要求，需 unit test 验证调用顺序
+- **Cancel 检查点**: 在每次 LLM 调用前 + binding 前；从 `state.cancel_requested` 读，命中则 raise `CancelledError`
 - **style_preset / target_duration_sec 注入方式**（**adhoc plan-4-rollback 校正, 2026-05-05**）：**直接从 `state.json` 读取**，无需 schema 改造。M1.4 已经实现完整链路：
   - `src/autoclip/pipeline/state.py:91-98` `_JobMeta` dataclass 已有 `target_duration_sec: int` + `style_preset: str` 字段
   - `src/autoclip/pipeline/state.py:122-128` `JobStateFile.init_state()` 签名已接受这两个参数
@@ -282,16 +330,30 @@
   - **回滚原因**：本 task 原 plan-4（commit 416bf55）写"M2a.6 用环境变量 AUTOCLIP_STYLE_PRESET 注入避免 schema 漂移"是基于错误假设——当时未 read state.py / api/jobs.py 真实代码，假设 M1.4 没实现这两个字段。Q5-corr 用 read_file 校正后发现 M1.4 已完整实现，env var 路径不仅多余还引入了"配置源歧义"（state.json vs env var 两个事实源）问题。本次回滚同时是 user_rules 第 7 条"严禁假设实现"的反面教材记录
 - **LIM#10 提醒**（**adhoc G2 补充, 2026-05-04 .context tech_debt**）：实现 scripting handler 后若**单跑** `pytest tests/unit/test_runner.py` 出现 `IngestError: raw directory missing` 是已知问题（LIM#10：`_stage_entrypoint` 内部调 `_load_stage_modules()` 重新 import 真 handler 覆盖 lambda），跑全量 `pytest tests/` 即 pass。本 task 不修 LIM#10，遗留到 M2a 收尾或首位踩坑开发者修复。
 
+- **K-clause 契约**（**v0.5 brainstorming Q4+Q6+Q7+Q8 落地，handler 入口必须满足以下 K 条款**）:
+  - **K3** — 每次 LLM call 必须经过 `LlmCallsRecorder` callback 落盘到 `{job_dir}/llm_calls/{stage}_{seq:03d}.json`（**Q4 决策**）；handler 不允许直接 `llm.invoke()` 而不传 callback
+  - **K7** — handler 入口处 `estimate_tokens(timestamped_text) > 32000` 时 raise `NarrativeIRTooLargeError("input exceeds 32k token budget; >2h video not supported in M2a")`（**Q7=A 决策**，>2h 视频留给 M2b/M3）
+  - **K8** — plot_outline 解析失败（含 LLM 网络失败 / JSON 不可修复 / Pydantic 校验失败）时 raise `PlotOutlineError`，stage→FAILED；**禁止**降级到 fallback outline（**Q6=A 决策**）
+  - **K9** — `{job_dir}/llm_calls/` 在 M3.6 cleanup 阶段整目录删除（与 `*.tmp` / `*.bak` 同批），不进入 final tarball；本 task 仅写入，cleanup 路径在 M3.6 task 实现
+  - **K10** — handler 必须按 8 个细里程碑顺序上报进度（0.05 / 0.10 / 0.25 / 0.30 / 0.60 / 0.65 / 0.80 / 0.95 / 1.00），**Q8=B 决策**；unit test 用 `MockJobStateFile` 验证调用顺序与时机
+
 **涉及文件**:
 - Create: `src/autoclip/pipeline/scripting.py`
 - Modify: `src/autoclip/pipeline/__init__.py`（追加 `from . import scripting`）
 - ~~Modify: `src/autoclip/pipeline/state.py`（init 增加 style_preset 字段）~~ **本 task 不需要**（M1.4 已实现 `_JobMeta.style_preset` + `_JobMeta.target_duration_sec`）
 - ~~Modify: `src/autoclip/api/jobs.py`（POST /api/jobs 把 style_preset 传给 state.init）~~ **本 task 不需要**（M1.4 已实现 `POST /api/jobs` Form 字段）
-- Create: `tests/integration/test_scripting_e2e.py`（mock LLMProvider，从 mock `state.json._JobMeta` 读取 target_duration_sec / style_preset）
+- Create: `tests/integration/test_scripting_e2e.py`（用 LangChain `FakeListChatModel` 注入预设 plot_outline + narrative_ir 响应，从 mock `state.json._JobMeta` 读取 target_duration_sec / style_preset；验证 8 个进度里程碑顺序）
+- Create: `tests/unit/test_scripting_handler_progress.py`（K10 进度顺序验证，独立单元测试）
 
 **测试策略**:
-- 集成（mock LLM）: patch QwenProvider 返回固定 JSON，验证 timeline.json 结构正确 + state DONE
-- 集成（真实 LLM，手动）: 跑 5min 短片，肉眼检查 timeline.json 合理度
+- **单元（K10 进度）**: 用 `FakeListChatModel` + `MockJobStateFile`，断言 8 个 progress 调用按 0.05→0.10→0.25→0.30→0.60→0.65→0.80→0.95→1.00 顺序触发
+- **单元（K7 阈值）**: 构造 timestamped_text > 32k token 的 input，断言 raise `NarrativeIRTooLargeError`
+- **单元（K8 硬失败）**: `FakeListChatModel` 返回不可修复 JSON（如 `"not json at all"`），断言 raise `PlotOutlineError` 且 stage→FAILED
+- **集成（mock LLM, K3 落盘验证）**: patch `get_llm` 返回 `FakeListChatModel + LlmCallsRecorder`，验证：
+  - timeline.json 结构正确（plot_outline + narrative_ir + binding_stats + segments）
+  - state DONE
+  - `{job_dir}/llm_calls/scripting_001.json` + `scripting_002.json` 文件存在且 schema 合法
+- **集成（真实 LLM，手动）**: 跑 5min 短片，肉眼检查 timeline.json 合理度 + DeepSeek 主路径 + dashscope 兜底路径各跑一次（B2=B 验收）
 
 **验收标准**:
 - [ ] mock 集成测试通过
@@ -306,24 +368,27 @@
 
 ---
 
-## M2a 总工时估算
-| 任务 | 工时 |
-|---|---|
-| M2a.1 LLMProvider | 0.5d |
-| M2a.2 Plot Outline | 1.0d |
-| M2a.3 Narrative IR | 1.0d |
-| M2a.4 JSON repair + retry | 0.5d |
-| M2a.5 简化绑定 | 1.0d |
-| M2a.6 Scripting handler | 1.5d |
-| **总计** | **5.5d**（控制在 W2 内） |
+## M2a 总工时估算（**v0.5 修订**）
 
-## M2a 完成时的 PR 描述模板
+| 任务 | v0.4 工时 | v0.5 工时 | 变化 |
+|---|---|---|---|
+| M2a.1 LangChain 集成 + LLMFactory + Callback | 0.5d | **1.0d** | +0.5d（B3=A 重写 + B2=B dashscope 实跑 + Callback 实现） |
+| M2a.2 Plot Outline | 1.0d | 1.0d | — |
+| M2a.3 Narrative IR | 1.0d | 1.0d | — |
+| M2a.4 JSON repair + retry | 0.5d | 0.5d | — |
+| M2a.5 简化绑定 | 1.0d | 1.0d | — |
+| M2a.6 Scripting handler | 1.5d | **0.8d** | **-0.7d**（K3 可观测性逻辑下沉到 M2a.1 Callback；handler 仅负责调用编排 + K7/K8/K10 守护） |
+| **总计** | **5.5d** | **5.3d** | **-0.2d**（控制在 W2 内） |
+
+> **工时净变化推导**（v0.5）：M2a.1 +0.5d（多写 Callback + 多跑 dashscope），M2a.6 -0.7d（不再自实现 LLM 调用记录逻辑，仅消费 Callback），净 -0.2d。仍有 1d buffer 在 W2 内（W2 = 5d 工作日）。
+
+## M2a 完成时的 PR 描述模板（**v0.5 修订**）
 ```
-✨feat: M2a - Scripting main loop (LLM + naive binding)
-    - T2a.1 LLMProvider abstraction + Qwen impl
-    - T2a.2 Plot outline extraction prompt
+✨feat: M2a - Scripting main loop (LangChain + DeepSeek + naive binding)
+    - T2a.1 LangChain BaseChatModel integration + LLMFactory (DeepSeek primary, dashscope fallback) + LlmCallsRecorder callback
+    - T2a.2 Plot outline extraction prompt (with main_characters role inference, v0.4)
     - T2a.3 Narrative IR data model + plot_summary style preset
-    - T2a.4 JSON repair + retry decorator
-    - T2a.5 Naive greedy binder (paragraph hint based)
-    - T2a.6 Scripting stage handler (E2E pipeline integrated)
+    - T2a.4 JSON repair + retry decorator (intentionally NOT using LangChain OutputFixingParser, B1=A)
+    - T2a.5 Naive greedy binder (paragraph hint based; BindingMethod enum with EVIDENCE_LOWCONFIDENCE reserved for M2b)
+    - T2a.6 Scripting stage handler (E2E pipeline + K3/K7/K8/K10 contracts + 8-milestone progress reporting)
 ```

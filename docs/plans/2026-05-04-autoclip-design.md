@@ -786,25 +786,38 @@ ffmpeg -y \
 
 ## 9. 技术选型 ADR（Architecture Decision Records）
 
-### ADR-001：LLM 选型 — 通义千问 Plus / DeepSeek-V3
+### ADR-001：LLM 选型 — DeepSeek-V3 主 + 通义千问兜底（**v0.5 修订**）
 
-**Status**: Accepted (MVP)
+**Status**: Accepted (MVP, **revised at 2026-05-05 by M2a brainstorming v0.5**)
 
-**Context**：Scripting 模块需要一个能稳定输出长 JSON、理解中文影视语境、成本可控的 LLM。
+**Context**：Scripting 模块需要一个能稳定输出长 JSON、理解中文影视语境、成本可控的 LLM。M2a kickoff brainstorming 时进一步引入了 4 个新约束：(1) 双引擎并存以防单一 provider 故障 (2) 通过统一抽象层避免代码绑死 provider (3) LLM 调用必须可观测可追溯 (4) >2h 长视频暂不支持但需要明确边界。
 
-**Decision**：MVP 默认 **通义千问 qwen-plus**（阿里云百炼），备选 **DeepSeek-V3**。
+**Decision**（**v0.5 更新**）：
+- **主 provider：DeepSeek-V3**（model `deepseek-chat`），通过 LangChain `langchain_openai.ChatOpenAI`（DeepSeek 官方支持 OpenAI 兼容协议）+ `base_url="https://api.deepseek.com/v1"` 接入
+- **兜底 provider：通义千问 qwen-plus**，通过 LangChain `langchain_community.chat_models.ChatTongyi` 接入；当 DeepSeek 不可用或用户显式指定时启用
+- **统一抽象层：LangChain `BaseChatModel`**，封装在 `src/autoclip/providers/llm/factory.py` 的 `get_llm(provider, json_mode, callbacks, **model_kwargs)` factory 内；切换 provider = 改一行 env var `AUTOCLIP_LLM_PROVIDER`
+- **可观测性：LangChain `BaseCallbackHandler`** 实现 `LlmCallsRecorder`，每次 call 落盘到 `{job_dir}/llm_calls/{stage}_{seq:03d}.json`（含 messages / response / usage / cost）
 
 **Consequences**：
-- ✅ 中文理解优秀，影视语境处理强于 GPT/Claude
-- ✅ 成本极低（qwen-plus ¥0.0008/1k tokens 输入，DeepSeek-V3 更便宜）
-- ✅ 国内 API 稳定、低延迟
-- ❌ 长 JSON 输出偶尔会截断（需要 retry + JSON repair）
-- ❌ 复杂"二创视角"质量略逊于 Claude Sonnet
+- ✅ DeepSeek-V3 成本最低（$0.14/$0.28 per 1M token，输入/输出），128k context window 充裕
+- ✅ JSON mode 通过 `model_kwargs={"response_format": {"type": "json_object"}}` 支持，与 OpenAI 协议一致
+- ✅ 中文理解 + 影视语境处理与 qwen-plus 相当，代码生成 + reasoning 显著强于 qwen-plus
+- ✅ LangChain 抽象层让"切 provider"成本降到 0；M2b 加 mock provider 直接用 `langchain.chat_models.fake.FakeListChatModel`
+- ✅ Callback 落盘让 LLM 调用 100% 可追溯（debug + prompt 调优 + 成本审计）
+- ❌ LangChain 0.x 大版本破坏性改动多，依赖紧锁 `langchain-core>=0.3,<0.4 + langchain-openai>=0.2,<0.3 + langchain-community>=0.3,<0.4`
+- ❌ 长 JSON 输出偶尔截断（M2a.4 自写 JSON repair 兜底；**故意不用** LangChain `OutputFixingParser`，避免修复策略黑盒化）
+- ❌ DeepSeek attention 在 >32k 输入后劣化，M2a 阶段限制单次 input ≤32k token，>2h 视频留给 M2b/M3
 
-**Alternatives Considered**：
-- Claude 3.5 Sonnet：质量最高但成本 5x、国内访问需代理 — v2 可作为高级用户的可选 upgrade
-- GPT-4o：综合能力强，国内接入麻烦，性价比一般
-- 本地 Qwen2.5-72B：避免 API 成本但需要 80GB 显存，不在 MVP 范围
+**Alternatives Considered**（**v0.5 重新评估**）：
+- **qwen-plus 单一 provider（v0.4 旧方案）**：风险集中、无 fallback，dashscope 限速时整个 pipeline 阻塞 — 已被 v0.5 否决
+- **自抽象 `LLMProvider` ABC（v0.4 旧方案）**：~150 行抽象层 + 每个 provider 重新实现 chat() / token 统计 / 错误处理 — 被 LangChain 替代，~30 行 factory 即可
+- **LangChain `OutputFixingParser`**：把 JSON 修复策略交给框架黑盒（失败时再调 LLM 让它修自己输出），调试成本极高 — B1=A 决策保留 M2a.4 自写 repair（5 步确定性策略）
+- **LangChain `ChatPromptTemplate` + `PydanticOutputParser`**：B1=A 决策不引入，prompt 仍用 f-string，输出仍走 M2a.4 自写解析；M2b 阶段如证明此处是瓶颈再升级
+- **Claude 3.5 Sonnet**：质量最高但成本 5x、国内访问需代理 — v2 可作为高级用户可选 upgrade
+- **GPT-4o**：综合能力强，国内接入麻烦，性价比一般
+- **本地 Qwen2.5-72B / DeepSeek-V3 本地**：避免 API 成本但需要 80GB+ 显存，不在 MVP 范围
+
+**Migration from v0.4**：v0.4 的 "qwen-plus 单一 + 自抽象" 方案在 M2a kickoff 时未实施任何代码（M2a.1 仍是 plan 状态），本次修订对实施零回滚成本；M2a.1 task 直接按 v0.5 方案落地。
 
 ---
 
