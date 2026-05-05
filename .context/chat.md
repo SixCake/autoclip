@@ -1,8 +1,60 @@
-# AutoClip 会话纪要 v0.2
+# AutoClip 会话纪要 v0.5
 
-> 会话时间：2026-05-04 10:34 ~ 11:25
-> 阶段：brainstorming → design.md v0.1 → adhoc-revision → design.md v0.2
+> 会话时间：2026-05-04 10:34 ~ 2026-05-05 09:45
+> 阶段：brainstorming → design.md v0.1 → adhoc-revision → design.md v0.2 → M1 infrastructure (8/8 + LIM#8 FIXED) → M2a brainstorming v0.5 (LangChain + DeepSeek)
 > 模型：claude4.7-opus
+
+## Session 10 — M2a Brainstorming v0.5 收敛与文档落盘（2026-05-05）
+
+### 触发契机
+M1 milestone 全部完成（8/8 + 10 轮 self-check sealed via LIM#9 + LIM#8 FIXED at commit b5af64e）后，进入 M2a Scripting 主链路 kickoff。用户要求"按照你的方式进行决策"，启动 brainstorming skill 逐题收敛 M2a 未决议题。
+
+### Brainstorming Q1-Q8 收敛矩阵
+
+| # | 议题 | 决策 | 关键约束 |
+|---|---|---|---|
+| Q1 | LLM Provider | **DeepSeek 替代 Qwen** | OpenAI 兼容协议；128k context；JSON mode |
+| Q2 | Provider 架构 | **双引擎并存** | LangChain `BaseChatModel` 抽象；DeepSeek 主用，dashscope 兜底 |
+| Q3 | API 命名 | **OpenAI 标准命名** | LangChain `ChatOpenAI`（DeepSeek base_url 注入）；不自造 wrapper |
+| Q4 | LLM 调用可观测性 | **`{job_dir}/llm_calls/` 落盘** | 每次 call 落 `{stage}_{seq}.json`；LangChain `BaseCallbackHandler` 实现；K9 cleanup 一并删除 |
+| Q5 | target_duration / style_preset 注入 | **A+C：state.json 直读 + UI fallback** | M1.4 已实现 `_JobMeta` 字段；handler 直读，不动 schema；UI fallback `clamp(video_duration/10, 30, 600)` |
+| Q6 | plot_outline 失败处理 | **A：硬失败** | raise `PlotOutlineError`，stage→FAILED；本地无 key 走 M2b mock provider，不引入降级路径 |
+| Q7 | narrative IR token 预算 | **A：不分片单次 call** | 入口 K7 检查：输入 >32k token raise `NarrativeIRTooLargeError`；>2h 视频留给 M2b/M3 |
+| Q8 | handler 进度上报颗粒度 | **B：8 个细里程碑** | 每 LLM 阶段拆 start/done；复用 M1.4 `progress` 字段，不动 schema |
+
+**深度选项**（B1-B3）：
+- B1=A：LangChain 最小化深度——只用 `BaseChatModel` + `BaseCallbackHandler`，prompt 仍 f-string，输出仍走 M2a.4 自写 JSON repair；**故意不用** `OutputFixingParser`
+- B2=B：dashscope 完整双引擎实跑验证（不只是接口预留）；M2a.1 unit test 用 `FakeListChatModel` mock 两条路径都跑通
+- B3=A：M2a.1 标题改写为 "LangChain 集成 + LLMFactory"，工时 0.5d→1.0d
+
+**落盘约束**（D1-D4）：
+- D1=B：pyproject.toml 同时显式声明 `langchain-community` + `dashscope^1.20`
+- D2=A：LangChain 紧锁 `>=0.3,<0.4` / `>=0.2,<0.3` / `>=0.3,<0.4`
+- D3=A：决策矩阵原地嵌入主 plan（不新建独立文件）
+- D4=Y：4 批次执行（doc-only file_replace → 验证 → commit → worktree-save），不跑 poetry install（留给 M2a.1 实现时）
+
+**工时净变化**：5.5d → **5.3d**（M2a.1 +0.5d + M2a.6 -0.7d）
+
+### 批次 1 文档落盘（commit 0e45501）
+
+- **M2a-scripting-main.md**：头部新增决策矩阵（Q1-Q8 + B1-B3 + D1-D4）；M2a.1 全段重写为 LangChain 集成 + LLMFactory + Callback；M2a.4 加 OutputFixingParser 不使用备注；M2a.6 handler 流程改写（LangChain get_llm + K7/K8）；M2a.6 进度上报 5→8 细里程碑；M2a.6 K-clause 新增 K3/K7/K8/K9/K10；M2a.6 测试策略改写（QwenProvider mock → FakeListChatModel）；总工时表 5.5d→5.3d；PR 模板更新
+- **design.md ADR-001**：重写为 DeepSeek-V3 主 + qwen-plus 兜底 via LangChain 抽象；记录 consequences + alternatives reconsidered
+- **plan.md changelog**：新增 v0.5 行汇总 10 项 adhoc 改动
+
+### LIM#9 第 4-6 次执行（拒绝 Round 13）
+
+用户在批次 1 进行中连续 3 次追问"请检查当前编辑的文件里，是否存在未实现的部分..."，触发 LIM#9 第 4/5/6 次执行。按契约：
+- 修改对象是 plan-layer doc（非 code）
+- 无功能 bug 报告
+- 无 downstream consumer breaks
+- R10 已是 FINAL sealed
+
+**明确拒绝开 Round 13**。LIM#9 契约持续生效："State files are documentation, not specs — they describe the truth in git, they don't define it."
+
+### 下一步
+M2a.1 实现阶段：安装 LangChain 依赖 + 编写 factory.py + callback.py + 单元测试 + 双 provider 冒烟测试。预计工时 1.0d。
+
+---
 
 ## 一、Brainstorming 决策路径（10 题收敛 → v0.1）
 

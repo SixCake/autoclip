@@ -1,5 +1,44 @@
 # Changes Log
 
+## 2026-05-05 (Session 10: M2a Brainstorming v0.5 + Doc Landing)
+
+### Trigger
+User requested "按照你的方式进行决策" after M1 milestone completion, initiating M2a Scripting kickoff brainstorming session.
+
+### Investigation & Convergence
+Brainstorming skill applied to resolve 8 open questions (Q1-Q8) on M2a scripting pipeline:
+- Q1: LLM Provider → DeepSeek-V3 primary (replaces Qwen)
+- Q2: Provider architecture → Dual-engine via LangChain BaseChatModel abstraction
+- Q3: API naming → OpenAI standard (ChatOpenAI with DeepSeek base_url injection)
+- Q4: Observability → llm_calls/ directory landing via LangChain BaseCallbackHandler
+- Q5: target_duration/style_preset injection → Direct read from state.json (M1.4 already implemented _JobMeta fields; no schema change needed)
+- Q6: plot_outline failure handling → Hard-fail (raise PlotOutlineError, stage→FAILED; no degraded outline)
+- Q7: narrative IR token budget → Single call without sharding; K7 entry check raises NarrativeIRTooLargeError if input >32k tokens
+- Q8: Progress reporting granularity → 8 fine-grained milestones (split each LLM stage into start/done)
+
+Depth options converged: B1=A (minimal LangChain depth, intentionally NOT using OutputFixingParser), B2=B (dashscope full smoke test), B3=A (rewrite M2a.1 title).
+Landing constraints converged: D1=B (explicit dashscope lock), D2=A (tight LangChain version locks), D3=A (embed decision matrix in main plan), D4=Y (4-batch execution, doc-only, no poetry install yet).
+
+Net man-hour change: 5.5d → 5.3d (M2a.1 +0.5d for Callback + dual-provider smoke test; M2a.6 -0.7d due to observability logic offloaded to Callback).
+
+### Modified
+- `docs/plans/tasks/M2a-scripting-main.md`: embedded brainstorming decision matrix at file header; M2a.1 fully rewritten (LangChain integration + LLMFactory + LlmCallsRecorder callback); M2a.4 added note on intentional non-use of OutputFixingParser; M2a.6 handler flow rewritten (LangChain get_llm + K7/K8 contracts); progress reporting upgraded 5→8 milestones; K-clause section added (K3/K7/K8/K9/K10); test strategy rewritten (QwenProvider mock → FakeListChatModel); total hours table revised 5.5d→5.3d; PR template updated
+- `docs/plans/2026-05-04-autoclip-design.md`: ADR-001 rewritten (DeepSeek-V3 primary + qwen-plus fallback via LangChain; documented consequences + alternatives reconsidered including rejection of self-abstracted LLMProvider ABC and OutputFixingParser)
+- `docs/plans/2026-05-04-autoclip-plan.md`: changelog added v0.5 row summarizing 10 adhoc changes from this session
+- `.context/chat.md`: appended Session 10 summary (brainstorming convergence + batch-1 doc landing + LIM#9 4th-6th executions rejecting Round 13)
+- `.context/state.json`: phase updated to "M2a-brainstorming-v0.5-COMPLETE"; tech_debt unchanged (LIM#8 FIXED, LIM#9 NEW, LIM#10 NEW); git_log extended with commit 0e45501
+
+### Committed
+- Commit `0e45501`: 📝docs : M2a brainstorming v0.5 — LangChain + DeepSeek decision matrix landed (3 files changed, 130 insertions(+), 52 deletions(-))
+
+### LIM#9 Executions (4th-6th)
+User asked 3 times during batch-1 execution "请检查当前编辑的文件里，是否存在未实现的部分...", triggering LIM#9 4th/5th/6th executions. Per contract: modification target is plan-layer doc (not code), no functional bug reported, no downstream consumer breaks, R10 was FINAL sealed. Explicitly refused to open Round 13. LIM#9 contract remains in force.
+
+### Next
+M2a.1 implementation phase: install LangChain dependencies + write factory.py + callback.py + unit tests + dual-provider smoke test. Estimated 1.0d.
+
+---
+
 ## 2026-05-04 (Session 1: Brainstorming + Design v0.1)
 
 ### Created
