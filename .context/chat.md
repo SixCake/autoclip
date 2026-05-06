@@ -1650,3 +1650,44 @@ v0.8.7 跑批报告输出后，直接进入 v0.8.8 backlog（不启 M2b-full）�
 - M4.2 人工评分：跑完 E2E 后填写 scripts/score_form.md
 - M4.5 KPI 全量验收：`poetry run python scripts/run_all_kpi.py`（K1-K7 需手工 E2E 数据）
 - MVP 发布门禁：P0 KPIs（K8/K9/K10/K11）已全部 ✅
+
+
+## 2026-05-06 Session 35: 接入 Qwen-TTS + 声音内容匹配 (替换 Volcengine)
+
+### 用户输入
+"接入qwen-tts，不实用字节的。帮我设计下声音与讲解内容匹配" + 贴入完整的 Qwen-TTS 官方文档 (5 模型 / 46 音色 / instructions 控制 / 声音复刻 / 声音设计)
+
+### 核心决策 (brainstorming Q1-Q4)
+- **Q1=A** 完全替换 Volcengine, stub 在 Qwen 内部重建
+- **Q2=B** 单 `qwen3-tts-instruct-flash` 模型, instructions 是核心红利
+- **Q3=B** 6 音色 1:1 固定映射, 可预期/可审计/可灰度
+- **Q4=A** 描述语义匹配, 直接拍板; 用户在 Q4 后表态"不用再问我直接干"
+
+### 映射表 (写入 voice_map.py)
+```
+archaeologist→Elias / empathy_senior→Maia / healing_big_sister→Seren
+rage_brother→Vincent / sarcastic_gen_z→Vivian / toxic_middle_aged→Eldric Sage
+fallback→Ethan
+```
+
+### 交付物 (16 todos)
+- 新建 4 文件 (qwen.py / voice_map.py / instructions.py / __init__.py 重写)
+- 重构 3 文件 (base.py 提共享工具 / assembly.py 切 provider + 读 persona/style / config.py 删 vol 加 qwen)
+- 删除 2 文件 (volcengine.py / test_tts_provider.py)
+- 新增 3 测试文件 (63 个新单测全过)
+- design.md §25 章节 (+124 行) + plan.md v0.9 行
+- 顺手修 api/jobs.py 缺失的 datetime import (Session 34 留下的回归)
+
+### 验证
+- 505 unit/integration passed (2 历史 e2e 失败留待下次)
+- 本次 8 文件 ruff lint clean
+- dry-run: persona=rage_brother → voice=Vincent → 完整 instructions → 3 wav 文件 ✅
+
+### Commit
+- hash: (pending, 本会话结束同步时打)
+- 13 files modified + 5 files created + 2 files deleted
+
+### 下一步 (Open Items)
+- 1h adhoc: 修 Session 33 引入的 e2e POST 响应 KeyError 'job_id' 回归
+- M5.x: 真机跑 demo, 校准 Maia vs Seren 听感差异
+- pyproject.toml: 显式锁 dashscope ≥1.24.6

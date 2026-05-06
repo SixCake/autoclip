@@ -1,15 +1,15 @@
 {
   "project": "autoclip",
-  "version": "0.13.1-cleanup-switch",
+  "version": "0.14.0-qwen-tts",
   "stage": "executing",
-  "phase": "M3+M4 完成 + Session 34: cleanup 总开关上线 (默认 OFF), 简化 Session 33 的 install 链路",
-  "current_focus": "cleanup 由 AUTOCLIP_CLEANUP_ENABLED 全局控制 (默认 OFF, 所有产物保留); 移除 Session 33 的 preserve_source_video / installed_to_jianying_at / _check_installed_to_jianying / _auto_add_missing_nullable_columns 复杂层",
+  "phase": "Session 35: Qwen-TTS 替换 Volcengine + 声音内容匹配上线 (persona→voice 1:1 映射 + instructions 动态组合)",
+  "current_focus": "TTS 层完全切换为 dashscope MultiModalConversation (qwen3-tts-instruct-flash); persona_inferer 输出的 6 类 persona 通过 voice_map.py 1:1 映射到 6 个 instruct 系统音色 (Elias/Maia/Seren/Vincent/Vivian/Eldric Sage + fallback Ethan); style_preset (default/humor_roast/serious_review) 通过 instructions.py 拼接为自然语言 instructions; 双层 stub fallback 保证 pipeline 永不 FAILED",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
-  "design_doc_lines": 2369,
-  "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
+  "design_doc_lines": 2842,
+  "design_doc_version": "v0.4 (Part IV §21-§24) + v0.6 §17.4 + v0.7 §25 Qwen-TTS 声音匹配 (Session 35, 2026-05-06, +124 行)",
   "plan_master_doc": "docs/plans/2026-05-04-autoclip-plan.md",
-  "plan_master_lines": 238,
-  "plan_master_version": "v0.8 (2026-05-05 Session 24: A 阶段对齐. baseline 报告推翻 v0.7 的 6.6d 三层枚举方案; M2a-fix 砍 -3.2d 改 8 任务 3.4d 渐进路径; M2b 大概率跳过)",
+  "plan_master_lines": 239,
+  "plan_master_version": "v0.9 (2026-05-06 Session 35: Qwen-TTS 接入 + 声音内容匹配, 完全替换 Volcengine)",
   "plan_subdocs": {
     "M1": {
       "path": "docs/plans/tasks/M1-infrastructure.md",

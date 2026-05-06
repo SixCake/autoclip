@@ -2573,3 +2573,108 @@ v0.8.8 backlog 处理：P0 评分维度校准 + P1 非叙事题材 fallback + P2
 
 ### Commit
 - 待本会话结束时 commit
+
+
+## 2026-05-06 (Session 35: 接入 Qwen-TTS + 声音内容匹配, 完全替换 Volcengine)
+
+### Trigger
+User instruction: "接入qwen-tts，不实用字节的。帮我设计下声音与讲解内容匹配" + 贴入完整的阿里云百炼 Qwen-TTS 文档（5 个模型 / 46 系统音色 / instructions 控制 / 声音复刻 / 声音设计）。明确要求**完全替换字节火山 TTS**, 并要求**自动设计声音 ↔ 讲解内容的匹配机制**。
+
+### Skill Execution: brainstorming (4 轮 Q1-Q4)
+
+**Configuration**:
+- Skill: brainstorming (任何 creative work 必走)
+- 严格遵守"一次只问一个问题"纪律
+- 每轮提供 trade-off 表格 + 推荐选项 + 反方意见
+
+**Q1 — Qwen-TTS 与现有 Volcengine 的关系？**
+- 候选 A 完全替换 / B 双 provider 并存 / C 用 Qwen 兜底 Volcengine / D Volcengine 兜底 Qwen
+- **用户答 A**：完全替换 Volcengine，删除代码与配置；stub-fallback 在 Qwen-TTS 内部重建
+
+**Q2 — Qwen-TTS 主用模型选型？**
+- 候选 A `qwen3-tts-flash` / B `qwen3-tts-instruct-flash` / C 双模型路由 / D 其他
+- **用户答 B**：单模型 instruct，放弃方言音色（autoclip 题材几乎不用），换取 instructions 自然语言控制力（这是声音匹配的核心红利）
+
+**Q3 — 音色池规模与映射策略？**
+- 候选 A 全开 24 音色 / B 精选 6 音色 1:1 固定映射 / C 分层池 6+hook 浮动 / D 用户 UI 自选
+- **用户答 B**：persona_id → voice_id 是纯函数（可预期/可审计/可灰度）；表现力靠 instructions 撑，而非音色切换
+
+**Q4 — 6→6 映射表的产生方式？**
+- 候选 A 我直接拍板（基于描述语义匹配）/ B 合成 demo 试听后定 / C LLM 动态选 / D 保守+大胆双套 env 切换 / E 用户告诉我偏好
+- **用户答 A**（明确指令"不用再问我，直接按照你推荐的方案进行设计"）：进入实现阶段
+
+### Final Mapping (写入 voice_map.py 常量)
+
+| persona_id | persona 中文名 | voice_id | voice 中文名 | 匹配理由 |
+|---|---|---|---|---|
+| `archaeologist` | 考古学家 | `Elias` | 墨讲师 | 学科严谨 + 叙事化讲解 |
+| `empathy_senior` | 共情学姐 | `Maia` | 四月 | 知性与温柔的碰撞 |
+| `healing_big_sister` | 治愈大姐 | `Seren` | 小婉 | 唯一明确"治愈"定位的音色 |
+| `rage_brother` | 暴躁老哥 | `Vincent` | 田叔 | 沙哑烟嗓 + 江湖豪情 |
+| `sarcastic_gen_z` | 讽刺 Z 世代 | `Vivian` | 十三 | 拽 + 可爱小暴躁 |
+| `toxic_middle_aged` | 毒舌中年 | `Eldric Sage` | 沧明子 | 沧桑睿智 + 看透世事 |
+| **fallback** | （任意未知/None） | `Ethan` | 晨煦 | 中性安全的阳光暖男声 |
+
+### Implementation Deliverables (16 todos, 13 files touched)
+
+**新建模块** (4 文件, 477 行):
+- `src/autoclip/providers/tts/qwen.py` (190 行) — QwenTTSProvider: dashscope.MultiModalConversation.call + 3 次 retry + httpx 流式下载 + 双层 stub fallback + _extract_audio_url 防御 SDK shape 变化
+- `src/autoclip/providers/tts/voice_map.py` (60 行) — PERSONA_TO_VOICE / DEFAULT_VOICE / VOICE_DISPLAY_NAMES / select_voice() 纯函数
+- `src/autoclip/providers/tts/instructions.py` (90 行) — _PERSONA_INSTRUCTIONS (6 行字典) + _STYLE_OVERLAYS (3 行字典) + build_instructions() 拼接纯函数
+- `src/autoclip/providers/tts/__init__.py` 重写导出: TTSProvider/TTSResult/TTSSegment + QwenTTSProvider + build_instructions + select_voice + PERSONA_TO_VOICE + DEFAULT_VOICE + VOICE_DISPLAY_NAMES (8 个公共符号)
+
+**重构** (3 文件):
+- `src/autoclip/providers/tts/base.py` (+65 行) — 提取 create_silent_wav / estimate_stub_duration / probe_duration 共享工具到模块级 (避免删 volcengine 后跟着删失); TTSProvider.synthesize_batch 加 instructions: str | None = None 可选参数 (向后兼容)
+- `src/autoclip/pipeline/assembly.py` (+52 行 / -10 行) — VolcengineTTSProvider → QwenTTSProvider; 新增逻辑读 timeline.json `recommended_persona.persona_id` + state.json `style_preset` → select_voice + build_instructions → provider.synthesize_batch(voice_id, instructions); assembly.json 新增 5 个审计字段 (voice_id / voice_display_name / persona_id / style_preset / instructions)
+- `src/autoclip/config.py` (-Volcengine 字段 +qwen_tts_model 字段) — 删除 volcengine_tts_token / volcengine_tts_app_id; 新增 qwen_tts_model: str (默认 "qwen3-tts-instruct-flash"); 复用已有 dashscope_api_key (LLM + TTS 共用)
+
+**删除** (2 文件):
+- `src/autoclip/providers/tts/volcengine.py` (164 行)
+- `tests/unit/test_tts_provider.py` (75 行)
+
+**配置改动**:
+- `.env.example` — 删 VOLCENGINE_TTS_TOKEN / VOLCENGINE_TTS_APP_ID; 加 QWEN_TTS_MODEL 默认值; DASHSCOPE_API_KEY 注释更新为"双用 LLM + TTS"
+
+**新增测试** (3 文件, 63 个新单测):
+- `tests/unit/test_qwen_tts.py` (24 测试) — TTSDataclasses (2) + StubHelpers (3) + QwenTTSProviderStubMode (8) + ExtractAudioUrl (4) — 含 attribute/dict 双形态响应 + 缺失 url + None response 防御
+- `tests/unit/test_voice_map.py` (10 测试) — PersonaWhitelistAlignment (2: 与 VALID_PERSONA_IDS 双向对齐) + VoiceDisplayNames (1) + SelectVoice (6: 已知/None/空/未知/默认/不抛异常)
+- `tests/unit/test_instructions_builder.py` (29 测试) — PersonaCoverage (6 parametrized + 3 fallback) + StyleOverlay (5: humor_roast/serious_review/default/unknown/None) + TokenBudget (18 parametrized: 6 persona × 3 style 全组合 ≤400 chars) + DoesNotRaise (1: 全组合不抛异常)
+
+**修改的测试** (1 文件):
+- `tests/unit/test_config.py` — 删 volcengine 断言; 加 qwen_tts_model 断言 + test_no_legacy_volcengine_fields 防回归 + test_qwen_tts_model_default
+
+**顺手修复** (本次会话发现的历史回归, 在 scope 内修):
+- `src/autoclip/api/jobs.py` 补 `from datetime import UTC, datetime` import — Session 34 commit ddf5df9 误删该 import 导致 e2e 4 个 datetime.now(UTC) 报 NameError (本次跑全量 pytest 才暴露)
+
+### design.md / plan.md 增量
+
+**design.md §25 Qwen-TTS 声音匹配** (+124 行, 2718→2842):
+- §25.1 决策树 (4 个 brainstorming Q + 1 个隐含 Q5 模板)
+- §25.2 模块拓扑 (providers/tts/* + assembly.py 数据流图)
+- §25.3 Persona → Voice 映射表 (6+1 行字典, 含匹配理由)
+- §25.4 Instructions 组合规则 (persona_base + style_overlay + 容错语义)
+- §25.5 配置矩阵 (DASHSCOPE_API_KEY 双用 + QWEN_TTS_MODEL)
+- §25.6 失败模式 (双层 stub fallback 表格)
+- §25.7 assembly.json schema 增量 (5 新字段 + add-only 原则)
+- §25.8 Consequences (4 正面 + 3 负面 + 回滚策略)
+
+**plan.md v0.9** (+1 行变更日志, 238→239)
+
+### Verification (3 检查项)
+
+1. **全量 pytest**: 505 passed / 9 skipped / 2 failed (历史回归 test_list_jobs_returns_newest_first / test_cancel_job_writes_cancel_signal — git stash 验证为 Session 33 引入的 KeyError 'job_id', 不在本次 scope, 留作下次 adhoc 修复)
+2. **ruff 本次改动 8 文件 lint clean** (其余 5 个历史 ruff 错误属于历史代码, 不在本次 scope)
+3. **dry-run stub 模式端到端验证** (无 DASHSCOPE_API_KEY): persona=rage_brother → voice=Vincent (田叔) → instructions="语速偏快，音量略高，带有明显的情绪起伏与江湖豪迈感，像一位仗义执言的老哥在激动地点评。 整体节奏更快一些，重音更鲜明，带出俏皮和锐利的吐槽感。" → 3 句生成 3 个 wav (tts_0000/0001/0002.wav, total=8.00s)
+
+### Karpathy 准则应用
+
+- **简洁优先**: 单 DASHSCOPE_API_KEY 同时驱动 LLM + TTS (凭据管理面 -50%); voice_map / instructions 是 2 个纯函数, 不引入 class
+- **精准修改**: 本次 13 文件改动全部集中在 TTS 层; 拒绝顺手修 5 个历史 ruff + 2 个历史 e2e 回归 (违反 scope discipline)
+- **显式暴露假设**: stub fallback 的 sample rate (24000) 写到 base.py 模块级常量, 与 Qwen-TTS pcm 输出对齐; "永不 FAILED" 准则在 §25.6 文档化
+- **可验证成功标准**: dry-run 显式验证 persona→voice→instructions→wav 全链路 (而非仅仅 unit 测试通过)
+
+### Known Open Items (留给下次会话)
+
+1. **历史 e2e 失败修复** (1h adhoc): Session 33 引入的 `installed_to_jianying_at` POST 响应结构变更, 导致 test_list_jobs_returns_newest_first / test_cancel_job_writes_cancel_signal 两个测试找不到 'job_id' key
+2. **真机听感校准** (M5.x voice tuning): 6 个 persona × N 部真实视频跑 demo, 验证 Maia (知性温柔) vs Seren (治愈) 听感差异度是否够; 必要时调整映射
+3. **dashscope SDK 升级核对**: 当前 pyproject.toml 未显式锁 dashscope 版本, Qwen-TTS 文档要求 ≥1.24.6 — 后续 commit 应加 dependency 约束
