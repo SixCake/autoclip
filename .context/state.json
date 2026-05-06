@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.12.0-M3M4-complete",
+  "version": "0.13.0-install-to-jianying",
   "stage": "executing",
-  "phase": "M3+M4 完成 — MVP 代码实现完毕，待手工 E2E 验收（M4.1/M4.2 需准备 fixture 视频）",
-  "current_focus": "MVP 手工 E2E 验收 — 准备 3 部 fixture 视频跑 scripts/e2e_run.py；填写 scripts/score_form.md；运行 scripts/run_all_kpi.py 汇总 KPI",
+  "phase": "M3+M4 完成 + Session 33: 安装到剪映链路上线 (K10 双轨制)",
+  "current_focus": "安装到剪映链路 E2E 验证完成；剩 MVP 手工 E2E 验收 (准备 fixture 视频跑 e2e_run.py + 评分)",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
   "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
@@ -612,8 +612,8 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-06T19:13:00.000000+08:00",
-  "last_session": "Session 30 — v0.8.8: D1/D5 score calibration (03=98/04=98 PASS), non-narrative plot_outline fallback (degraded=True), shared-ASR batch runner (cold-start eliminated); 374 passed 0 fail",
+  "updated_at": "2026-05-06T11:33:58.657985+08:00",
+  "last_session": "Session 33 — Install-to-Jianying button: K10 双轨制 (download=placeholder, install=absolute path); new files: jianying.install_to_jianying_drafts/discover_jianying_drafts_dir, POST /jobs/{id}/install-to-jianying, Job.installed_to_jianying_at, cleanup preserve_source_video; 10 new unit tests passed; E2E browser click verified draft folder creation at ~/Movies/JianyingPro/.../com.lveditor.draft/autoclip_1_*",
   "m3_m4_summary": {
     "commit": "aef52e3",
     "files_added": 33,
@@ -626,5 +626,28 @@
       "style_dispatch": "_STYLE_REGISTRY {plot_summary,humor_roast,serious_review}",
       "self_eval_failure": "graceful degrade to 3.0/5 neutral score"
     }
+  },
+  "session_33_summary": {
+    "trigger": "用户问 zip 只有 json+wav 如何剪辑",
+    "decision_brainstorming": "方案 C — 在 draft_content.json 写 source.mp4 本地绝对路径 (不复制原片)",
+    "design_principle": "K10 双轨制 — 下载链路保持占位符 (对外合规), 安装链路写本机绝对路径 (本机最佳体验)",
+    "files_added": [
+      "tests/unit/test_install_to_jianying.py (10 tests)"
+    ],
+    "files_modified": [
+      "src/autoclip/exporters/jianying.py (+install_to_jianying_drafts +discover_jianying_drafts_dir +_build_draft_content 双模式)",
+      "src/autoclip/api/jobs.py (+POST /jobs/{id}/install-to-jianying)",
+      "src/autoclip/models/job.py (+installed_to_jianying_at)",
+      "src/autoclip/db.py (+_auto_add_missing_nullable_columns)",
+      "src/autoclip/compliance/cleanup.py (+preserve_source_video)",
+      "src/autoclip/pipeline/render.py (+_check_installed_to_jianying)",
+      "src/autoclip/web/templates/result.html (+按钮+JS)"
+    ],
+    "verification": {
+      "unit_tests": "10 passed in 0.04s",
+      "db_migration": "jobs.installed_to_jianying_at auto-added via _auto_add_missing_nullable_columns",
+      "e2e_browser_click": "PASS — draft folder created at ~/Movies/JianyingPro/.../autoclip_1_20260506_033027/, abs paths verified, DB marked"
+    },
+    "env_var": "JIANYING_DRAFT_DIR (override drafts folder; defaults to macOS ~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft)"
   }
 }

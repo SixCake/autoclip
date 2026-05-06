@@ -58,20 +58,36 @@ def _safe_delete_dir(path: Path, reason: str, job_dir: Path | None = None) -> bo
     return True
 
 
-def cleanup_after_render(job_dir: Path) -> None:
+def cleanup_after_render(job_dir: Path, *, preserve_source_video: bool = False) -> None:
     """Delete raw video files immediately after Render stage succeeds.
 
     Deletes:
     - normalized.mp4 (large; created by ingest)
     - source.mp4 (raw upload; kept during pipeline, deleted after export)
     - temp/ directory (intermediate files)
+
+    Args:
+        preserve_source_video: when True, source.mp4 is NOT deleted. Used by
+            the install-to-jianying branch (Session 33) where the local Jianying
+            draft references source.mp4 via absolute path; deleting it would
+            break the linked draft. normalized.mp4 + temp/ are always cleaned.
     """
     deleted_count = 0
 
-    for filename in ("normalized.mp4", "source.mp4"):
+    files_to_delete = ["normalized.mp4"]
+    if not preserve_source_video:
+        files_to_delete.append("source.mp4")
+
+    for filename in files_to_delete:
         target = job_dir / filename
         if _safe_delete_file(target, "post_render_cleanup", job_dir):
             deleted_count += 1
+
+    if preserve_source_video:
+        _audit_log(
+            job_dir,
+            "PRESERVE source.mp4 reason=installed_to_jianying (K10 双轨制 install branch)",
+        )
 
     temp_dir = job_dir / "temp"
     if _safe_delete_dir(temp_dir, "post_render_cleanup", job_dir):

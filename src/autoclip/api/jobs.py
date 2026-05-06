@@ -371,3 +371,88 @@ def download_output(
         filename=filename,
         media_type="application/zip",
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/jobs/{id}/install-to-jianying — Session 33 install branch
+# ---------------------------------------------------------------------------
+
+@router.post("/{job_id}/install-to-jianying")
+def install_to_jianying(
+    job_id: int,
+    session_factory: Annotated[Any, Depends(get_session_factory)],
+) -> dict[str, Any]:
+    """Materialize the job's draft directly into the local Jianying drafts dir.
+
+    This is the K10 双轨制 install branch: writes draft_content.json with
+    absolute paths to the user's local source.mp4 + copies TTS wavs into
+    a per-job subfolder under the user's Jianying drafts root. Marks the job
+    so cleanup_after_render will not delete source.mp4 (otherwise Jianying
+    would open with broken media references).
+    """
+    import json as _json
+
+    from ..exporters.jianying import (
+        JianyingDraftsDirNotFound,
+        JianyingExportError,
+        install_to_jianying_drafts,
+    )
+
+    # 1) Validate job state
+    with session_scope(session_factory) as sess:
+        job = sess.get(Job, job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Job {job_id} not found")
+        if job.status != JobStatus.DONE:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Job {job_id} is not done yet (status={job.status.value}); cannot install",
+            )
+
+    # 2) Verify timeline.json + assembly.json exist
+    job_dir = _job_dir(job_id)
+    timeline_path = job_dir / "timeline.json"
+    assembly_path = job_dir / "assembly.json"
+    if not timeline_path.exists() or not assembly_path.exists():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Job {job_id} missing timeline.json or assembly.json — cannot install",
+        )
+
+    timeline = _json.loads(timeline_path.read_text(encoding="utf-8"))
+    assembly = _json.loads(assembly_path.read_text(encoding="utf-8"))
+
+    # 3) Install (may raise JianyingDraftsDirNotFound → 400)
+    try:
+        result = install_to_jianying_drafts(
+            timeline=timeline,
+            assembly=assembly,
+            job_dir=job_dir,
+            job_id=job_id,
+        )
+    except JianyingDraftsDirNotFound as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except JianyingExportError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+
+    # 4) Mark job so cleanup_after_render preserves source.mp4
+    with session_scope(session_factory) as sess:
+        job = sess.get(Job, job_id)
+        job.installed_to_jianying_at = datetime.now(UTC)
+
+    logger.info(
+        "Job %d installed to Jianying drafts: %s (source_linked=%s, tts=%d)",
+        job_id, result["draft_dir"], result["source_video_linked"], result["tts_files_copied"],
+    )
+
+    return {
+        "job_id": job_id,
+        "installed": True,
+        **result,
+        "next_steps": (
+            "已安装到剪映草稿目录。请打开剪映 → 草稿箱即可看到新草稿"
+            "（如果没看到，请退出剪映重新打开以刷新列表）。"
+            if result["source_video_linked"]
+            else "已安装但本地原片缺失，剪映打开后会提示『媒体缺失』，需手动重新链接素材。"
+        ),
+    }

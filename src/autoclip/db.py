@@ -103,8 +103,44 @@ def session_scope(session_factory: sessionmaker[Session]) -> Iterator[Session]:
 # ---------------------------------------------------------------------------
 
 def init_db(engine: Engine) -> None:
-    """Create all tables. Idempotent."""
+    """Create all tables. Idempotent.
+
+    Also performs lightweight schema upgrade for existing SQLite files:
+    detects new nullable columns declared on ORM models and ALTER TABLE
+    ADD COLUMN them when missing. This avoids needing Alembic for the
+    MVP's nullable-only forward-compat additions.
+    """
     Base.metadata.create_all(engine)
+    _auto_add_missing_nullable_columns(engine)
+
+
+def _auto_add_missing_nullable_columns(engine: Engine) -> None:
+    """For each ORM table, ALTER TABLE ADD COLUMN any nullable column
+    declared on the model but missing in the live DB.
+
+    SQLite supports ADD COLUMN (with NULL default) since 3.2; safe for
+    nullable forward-compat additions only. Refuses non-nullable adds.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        for table_name, table in Base.metadata.tables.items():
+            if table_name not in existing_tables:
+                continue  # create_all just made it; columns are in sync
+            live_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            for col in table.columns:
+                if col.name in live_cols:
+                    continue
+                if not col.nullable:
+                    # Refuse silent non-null add — would break inserts on old rows
+                    continue
+                col_type_sql = col.type.compile(dialect=engine.dialect)
+                conn.execute(text(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type_sql}'
+                ))
 
 
 def drop_all(engine: Engine) -> None:

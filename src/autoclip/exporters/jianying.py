@@ -3,13 +3,21 @@
 Uses pyJianYingDraft if available; falls back to a structured zip mimicking
 Jianying draft format when the library is not installed (R1 risk mitigation).
 
-K10: all material paths use placeholder './materials/source.mp4'.
+K10 双轨制 (Session 33):
+- Download branch (export()): material paths = placeholder './materials/source.mp4'
+  (zero-knowledge compliance, distributable to anyone)
+- Install branch (install_to_jianying_drafts()): material path = absolute path
+  to user's local source.mp4 (only written into the user's own Jianying draft
+  directory on their own machine — never distributed; cleanup_after_render
+  must skip source.mp4 when this branch is used).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,10 +44,22 @@ def _build_draft_content(
     segments: list[dict],
     sentences: list[dict],
     video_id: str = "placeholder-video-material",
+    *,
+    video_source_path: str = "./materials/source.mp4",
+    narration_path_mode: str = "relative",  # "relative" | "absolute_in_dir"
+    narration_dir_abs: Path | None = None,
 ) -> dict:
     """Build draft_content.json structure (Jianying format approximation).
 
-    K10: material id uses placeholder, not real path.
+    Args:
+        video_source_path: written into materials.videos[0].path. Default is the
+            K10 placeholder; install branch passes the absolute local path to
+            the user's source.mp4 so Jianying opens with media linked.
+        narration_path_mode: "relative" keeps audio_path as-is (zip download
+            branch where wav lives at materials/tts_*.wav inside the zip);
+            "absolute_in_dir" rewrites narration material_id to
+            f"{narration_dir_abs}/{basename}" (install branch where wavs are
+            copied next to draft_content.json under the Jianying drafts folder).
     """
     tracks = []
     video_cursor_us = 0  # microseconds
@@ -75,11 +95,17 @@ def _build_draft_content(
     for sent in sentences:
         duration_sec = sent.get("actual_duration_sec", 2.0)
         duration_us = int(duration_sec * 1_000_000)
-        audio_path = sent.get("audio_path", "")
+        audio_path_rel = sent.get("audio_path", "")
+
+        # Resolve narration material path per mode (K10 双轨制)
+        if narration_path_mode == "absolute_in_dir" and narration_dir_abs is not None:
+            narration_material_id = str(narration_dir_abs / Path(audio_path_rel).name)
+        else:
+            narration_material_id = audio_path_rel  # relative within zip / job dir
 
         narration_segments.append({
             "id": f"narration_seg_{sent['sentence_idx']:04d}",
-            "material_id": audio_path,  # relative path within job dir
+            "material_id": narration_material_id,
             "source_timerange": {"start": 0, "duration": duration_us},
             "target_timerange": {"start": narration_cursor_us, "duration": duration_us},
             "type": "audio",
@@ -130,7 +156,7 @@ def _build_draft_content(
         "version": "5.9.0",
         "tracks": tracks,
         "materials": {
-            "videos": [{"id": video_id, "path": "./materials/source.mp4"}],
+            "videos": [{"id": video_id, "path": video_source_path}],
         },
     }
 
@@ -268,3 +294,165 @@ class JianyingDraftExporter(DraftExporter):
             exporter_name=self.name,
             track_counts=track_counts,
         )
+
+
+# ---------------------------------------------------------------------------
+# Install branch (Session 33) — write draft directly into Jianying drafts dir
+# with absolute paths to local source.mp4 (K10 双轨制 — local-only, never
+# distributed).
+# ---------------------------------------------------------------------------
+
+class JianyingDraftsDirNotFound(Exception):
+    """Raised when the user's Jianying drafts folder cannot be located."""
+
+
+def discover_jianying_drafts_dir() -> Path:
+    """Locate the Jianying drafts root directory on the current machine.
+
+    Resolution order:
+      1. Env var JIANYING_DRAFT_DIR (user override)
+      2. macOS default: ~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft
+      3. Windows default: %LOCALAPPDATA%/JianyingPro/User Data/Projects/com.lveditor.draft
+
+    Raises:
+        JianyingDraftsDirNotFound: when no candidate exists.
+    """
+    override = os.environ.get("JIANYING_DRAFT_DIR")
+    if override:
+        path = Path(override).expanduser()
+        if path.is_dir():
+            return path
+        raise JianyingDraftsDirNotFound(
+            f"JIANYING_DRAFT_DIR is set to '{override}' but is not an existing directory"
+        )
+
+    candidates: list[Path] = []
+    home = Path.home()
+    # macOS
+    candidates.append(home / "Movies" / "JianyingPro" / "User Data" / "Projects" / "com.lveditor.draft")
+    # Windows
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(
+            Path(local_appdata) / "JianyingPro" / "User Data" / "Projects" / "com.lveditor.draft"
+        )
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+
+    raise JianyingDraftsDirNotFound(
+        "Jianying drafts directory not found. Set the JIANYING_DRAFT_DIR env var "
+        f"to your draft folder (Jianying → 全局设置 → 草稿位置). Tried: "
+        f"{[str(c) for c in candidates]}"
+    )
+
+
+def install_to_jianying_drafts(
+    timeline: dict,
+    assembly: dict,
+    job_dir: Path,
+    *,
+    job_id: int,
+    drafts_root: Path | None = None,
+    source_video_path: Path | None = None,
+) -> dict:
+    """Materialize a Jianying draft directly into the user's drafts folder.
+
+    Writes:
+        <drafts_root>/autoclip_<job_id>_<timestamp>/
+            draft_content.json    — materials.videos[0].path = abs source_video_path
+                                    narration material_id   = abs path next to draft
+            draft_meta_info.json
+            tts_*.wav             — copied from job_dir/tts/
+
+    Args:
+        job_id: numeric Job.id (used in draft folder name)
+        drafts_root: override discovery (mainly for tests)
+        source_video_path: absolute path to user's source.mp4. If None, falls
+            back to job_dir/source.mp4. If that file is missing, the install
+            still proceeds but the user will see "media offline" in Jianying
+            and must relink manually.
+
+    Returns:
+        {
+            "draft_dir": str(absolute path),
+            "draft_name": str,
+            "source_video_linked": bool,    # whether source.mp4 was found
+            "source_video_path": str | None,
+            "tts_files_copied": int,
+        }
+    """
+    if drafts_root is None:
+        drafts_root = discover_jianying_drafts_dir()
+    drafts_root.mkdir(parents=True, exist_ok=True)
+
+    segments = timeline.get("segments", [])
+    sentences = assembly.get("sentences", [])
+    if not segments:
+        raise JianyingExportError("No segments in timeline — cannot install draft")
+
+    # Resolve source video absolute path
+    if source_video_path is None:
+        source_video_path = job_dir / "source.mp4"
+    source_video_linked = source_video_path.exists()
+    video_source_str = str(source_video_path.resolve())
+    if not source_video_linked:
+        logger.warning(
+            "[jianying-install] source video not found at %s — draft will open with "
+            "missing media (user must relink in Jianying)",
+            source_video_path,
+        )
+
+    # Create per-job draft directory (timestamped to avoid collision on reinstall)
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    draft_name = f"autoclip_{job_id}_{timestamp}"
+    draft_dir = drafts_root / draft_name
+    draft_dir.mkdir(parents=True, exist_ok=False)
+
+    # Copy TTS wavs flat into draft_dir (Jianying scans subdir for media)
+    tts_files_copied = 0
+    for sent in sentences:
+        audio_rel = sent.get("audio_path", "")
+        if not audio_rel:
+            continue
+        src = job_dir / audio_rel
+        if not src.exists():
+            logger.warning("[jianying-install] missing TTS wav: %s", src)
+            continue
+        dst = draft_dir / src.name
+        if not dst.exists():  # de-dup on shared filename
+            shutil.copy2(src, dst)
+            tts_files_copied += 1
+
+    # Build draft_content with absolute paths (install branch)
+    draft_content = _build_draft_content(
+        segments,
+        sentences,
+        video_source_path=video_source_str,
+        narration_path_mode="absolute_in_dir",
+        narration_dir_abs=draft_dir.resolve(),
+    )
+    draft_meta = _build_draft_meta(draft_dir)
+
+    (draft_dir / "draft_content.json").write_text(
+        json.dumps(draft_content, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (draft_dir / "draft_meta_info.json").write_text(
+        json.dumps(draft_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    logger.info(
+        "[jianying-install] draft created at %s (source_linked=%s, tts=%d)",
+        draft_dir, source_video_linked, tts_files_copied,
+    )
+
+    return {
+        "draft_dir": str(draft_dir),
+        "draft_name": draft_name,
+        "source_video_linked": source_video_linked,
+        "source_video_path": video_source_str if source_video_linked else None,
+        "tts_files_copied": tts_files_copied,
+    }

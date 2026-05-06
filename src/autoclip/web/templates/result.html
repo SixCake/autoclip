@@ -8,19 +8,102 @@
 
 {% if downloads %}
 <div class="bg-white rounded-xl shadow p-6 mb-6">
-  <h2 class="text-sm font-semibold text-gray-700 mb-4">草稿包下载</h2>
-  <div class="space-y-3">
-    {% for dl in downloads %}
-    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-      <div>
-        <p class="font-medium text-gray-800 text-sm">{{ dl.name }}</p>
-        <p class="text-xs text-gray-400">{{ dl.size_mb }} MB</p>
+  <h2 class="text-sm font-semibold text-gray-700 mb-4">在剪映中编辑</h2>
+  <p class="text-xs text-gray-500 mb-4">
+    点击下方按钮，AutoClip 会把当前草稿（已包含解说音轨 + 字幕 + 时间线 + 你本机原片的引用）直接安装到本机剪映的草稿目录，无需手动导入。
+  </p>
+
+  <button
+    id="install-jianying-btn"
+    type="button"
+    class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-lg text-sm font-semibold hover:bg-indigo-700 active:bg-indigo-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+    data-job-id="{{ job_id }}"
+  >
+    <span id="install-jianying-icon">📥</span>
+    <span id="install-jianying-label">在剪映中打开</span>
+  </button>
+
+  <!-- Success / error feedback -->
+  <div id="install-jianying-feedback" class="hidden mt-4"></div>
+
+  <details class="mt-5">
+    <summary class="text-xs text-gray-400 cursor-pointer hover:text-gray-600">或下载草稿包手动导入</summary>
+    <div class="mt-3 space-y-2">
+      {% for dl in downloads %}
+      <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+        <div>
+          <p class="text-sm text-gray-700">{{ dl.name }}</p>
+          <p class="text-xs text-gray-400">{{ dl.size_mb }} MB</p>
+        </div>
+        <a href="{{ dl.url }}" class="text-xs text-gray-500 underline hover:text-gray-700">下载</a>
       </div>
-      <a href="{{ dl.url }}" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">下载</a>
+      {% endfor %}
     </div>
-    {% endfor %}
-  </div>
+  </details>
 </div>
+
+<script>
+(function () {
+  const btn = document.getElementById("install-jianying-btn");
+  if (!btn) return;
+  const icon = document.getElementById("install-jianying-icon");
+  const label = document.getElementById("install-jianying-label");
+  const feedback = document.getElementById("install-jianying-feedback");
+  const jobId = btn.dataset.jobId;
+
+  function setBusy(busy) {
+    btn.disabled = busy;
+    icon.textContent = busy ? "⏳" : "📥";
+    label.textContent = busy ? "正在安装到剪映…" : "在剪映中打开";
+  }
+
+  function showSuccess(data) {
+    const linkedNote = data.source_video_linked
+      ? `<p class="text-xs text-green-700 mt-1">原片已自动链接，剪映打开后可直接编辑。</p>`
+      : `<p class="text-xs text-amber-700 mt-1">⚠️ 本机未找到原片，剪映打开后会提示『媒体缺失』，请手动重新链接素材。</p>`;
+    feedback.className = "mt-4 p-4 bg-green-50 border border-green-200 rounded-lg";
+    feedback.innerHTML = `
+      <p class="text-sm font-semibold text-green-800">✅ 已安装到剪映草稿目录</p>
+      <p class="text-xs text-gray-700 mt-2">草稿名：<code class="bg-white px-1.5 py-0.5 rounded text-gray-800">${data.draft_name}</code></p>
+      <p class="text-xs text-gray-500 mt-1 break-all">📁 ${data.draft_dir}</p>
+      <p class="text-xs text-gray-700 mt-2">${data.next_steps || "请打开剪映 → 草稿箱即可看到（可能需要退出剪映重新打开以刷新列表）。"}</p>
+      ${linkedNote}
+    `;
+    feedback.classList.remove("hidden");
+  }
+
+  function showError(message) {
+    feedback.className = "mt-4 p-4 bg-red-50 border border-red-200 rounded-lg";
+    feedback.innerHTML = `
+      <p class="text-sm font-semibold text-red-800">❌ 安装失败</p>
+      <p class="text-xs text-red-700 mt-2 break-all">${message}</p>
+      <p class="text-xs text-gray-500 mt-2">提示：如果剪映草稿目录不在默认位置，可设置环境变量 <code class="bg-white px-1.5 py-0.5 rounded">JIANYING_DRAFT_DIR</code> 后重启服务再试，或先点击下方"下载草稿包"手动导入。</p>
+    `;
+    feedback.classList.remove("hidden");
+  }
+
+  btn.addEventListener("click", async () => {
+    feedback.classList.add("hidden");
+    setBusy(true);
+    try {
+      const resp = await fetch(`/api/jobs/${jobId}/install-to-jianying`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        showError(data.detail || `HTTP ${resp.status}`);
+      } else {
+        showSuccess(data);
+      }
+    } catch (err) {
+      showError(err.message || String(err));
+    } finally {
+      setBusy(false);
+    }
+  });
+})();
+</script>
 
 {% if self_eval %}
 <div class="bg-white rounded-xl shadow p-6 mb-6">

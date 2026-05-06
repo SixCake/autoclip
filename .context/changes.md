@@ -2432,3 +2432,96 @@ v0.8.8 backlog 处理：P0 评分维度校准 + P1 非叙事题材 fallback + P2
 ### Commit
 - hash: aef52e3
 - branch: main（8 commits ahead of origin/main）
+
+---
+
+## 2026-05-06 (Session 32: Bugfix — assembly 全局索引 + jianying zip 打包 TTS 音频)
+
+### Trigger
+用户打开 Web 页面，发现 `jianying_draft.zip` 显示 **0.0 MB**（实际 3KB）。
+
+### Root Cause Analysis
+
+**Bug 1 — `assembly.py` `sentence_idx` 段落内重复**:
+- `timeline.json` 的 `sentence_idx` 是段落内索引（每段从 0 重置），4 段落共 11 句子只对应 0/1/2
+- TTS 合成用 `sentence_idx` 命名文件：11 句子只产生 3 个 wav 文件，多句共用同一音频
+
+**Bug 2 — `jianying.py` fallback zip 未打包 TTS 音频**:
+- `_export_fallback_zip` 只写了 JSON + README，未将 `tts/*.wav` 打包进 zip
+- zip 只有 3KB，Web UI 显示四舍五入为 0.0 MB
+
+### Fixes
+
+**`src/autoclip/pipeline/assembly.py`**:
+- `_load_sentences_from_timeline`：改用 `global_idx`（单调递增）替代段落内 `sentence_idx`
+- 确保 11 个句子得到 11 个独立的 wav 文件（tts_0000.wav ~ tts_0010.wav）
+
+**`src/autoclip/exporters/jianying.py`**:
+- `_export_fallback_zip`：遍历 sentences 的 `audio_path`，去重后用 `zf.write()` 打包进 `materials/`
+- 添加打包计数日志（TTS file count + KB size）
+
+### Verification
+- Assembly 重跑：11 sentences → 11 独立 wav 文件 ✅
+- Render 重跑：zip 14KB（4 tracks + 11 TTS files）✅
+- K10 validation PASSED ✅
+- Web UI 结果页面显示 **0.01 MB** ✅
+
+### Commit
+- hash: e9d78ce
+- 2 files changed, 36 insertions(+), 6 deletions(-)
+
+---
+
+## 2026-05-06 (Session 33: Feature — 「在剪映中打开」按钮 + K10 双轨制)
+
+### Trigger
+用户问："目前打包文件只有 json 和 wav，原视频内容如何剪辑呢？"
+经 brainstorming 调研：剪映无 URL Scheme，但运行时会扫描 drafts 文件夹。
+用户选定方案 C（在 draft_content.json 写 source.mp4 本地绝对路径，不复制原片）。
+
+### K10 双轨制设计
+- **下载链路** (`export()` → zip)：`materials.videos[0].path = "./materials/source.mp4"`（占位符）
+- **安装链路** (`install_to_jianying_drafts()`)：`materials.videos[0].path = "/abs/path/to/data/jobs/{job_id}/source.mp4"`（绝对路径）
+- 安装链路只在用户本机运行，绝对路径不会被分发，对外合规承诺保持
+- 调用安装链路后 DB 标记 `installed_to_jianying_at`，cleanup 跳过删 source.mp4
+
+### Files Added
+- `tests/unit/test_install_to_jianying.py` — 10 个单元测试（discover / build_draft_content 双模式 / install happy+edge）
+
+### Files Modified
+- `src/autoclip/exporters/jianying.py`
+  - `_build_draft_content` 加可选参数 `video_source_path` + `narration_path_mode` + `narration_dir_abs`，向后兼容
+  - 新增 `discover_jianying_drafts_dir()`：env override → macOS 默认 → Windows 默认 → 抛 `JianyingDraftsDirNotFound`
+  - 新增 `install_to_jianying_drafts()`：在 drafts root 下建 `autoclip_{job_id}_{ts}/` 目录，写绝对路径 draft + 复制 wavs
+- `src/autoclip/api/jobs.py`
+  - 新增 `POST /jobs/{id}/install-to-jianying`：校验 done → 调安装链路 → 写 DB 标记 → 返回 next_steps 文案
+- `src/autoclip/models/job.py`
+  - 新增 `installed_to_jianying_at: DateTime | None`
+- `src/autoclip/db.py`
+  - `init_db` 新增 `_auto_add_missing_nullable_columns`：SQLite 兼容的轻量自动 ALTER TABLE（仅 nullable 列）
+- `src/autoclip/compliance/cleanup.py`
+  - `cleanup_after_render` 加 `preserve_source_video: bool = False` 关键字参数；保留时写 audit 日志
+- `src/autoclip/pipeline/render.py`
+  - 新增 `_check_installed_to_jianying(job_dir)` 子进程内 fresh engine 查 DB
+  - cleanup 前调用，传入 `preserve_source_video`
+- `src/autoclip/web/templates/result.html`
+  - 主操作改为「📥 在剪映中打开」紫色主按钮 + 折叠区保留下载入口
+  - 内嵌 JS：fetch POST → loading → 成功/失败彩色反馈块（显示 draft_dir/draft_name + next_steps）
+  - 失败提示 `JIANYING_DRAFT_DIR` 环境变量配置方式
+
+### Verification
+- 单元测试：10 passed in 0.04s ✅
+- DB schema 自动升级：jobs 表已 ALTER 加 installed_to_jianying_at ✅
+- E2E（Web 浏览器点按钮）：
+  - 草稿目录创建：`~/Movies/JianyingPro/.../com.lveditor.draft/autoclip_1_20260506_033027/` ✅
+  - draft_content.json: `materials.videos[0].path = /Users/mcfell/Documents/aiproject/autoclip/data/jobs/1/source.mp4` ✅
+  - narration material_id: `.../autoclip_1_.../tts_0000.wav`（绝对路径）✅
+  - DB 标记：`installed_to_jianying_at = 2026-05-06 03:30:27.621450` ✅
+  - 前端 toast 显示「✅ 已安装到剪映草稿目录」+ source missing warning ✅
+
+### Notes
+- 此次 E2E 实测时本机 source.mp4 已被先前 cleanup 删除（旧逻辑），所以走了「无原片」分支并正确给出"媒体缺失"提示——证明降级路径工作正常
+- 新功能上线后再做的 install 会自动保留 source.mp4，符合设计
+
+### Commit
+- 待本会话结束时 commit
