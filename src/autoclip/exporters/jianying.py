@@ -219,11 +219,19 @@ class JianyingDraftExporter(DraftExporter):
         job_dir: Path,
         output_dir: Path,
     ) -> ExportResult:
-        """Export as structured zip without pyjianyingdraft."""
+        """Export as structured zip without pyjianyingdraft.
+
+        Packs:
+          draft_content.json   — 4-track timeline structure
+          draft_meta_info.json — version + generator info
+          materials/           — TTS wav files + README
+        """
         draft_content = _build_draft_content(segments, sentences)
         draft_meta = _build_draft_meta(job_dir)
 
         zip_path = output_dir / "jianying_draft.zip"
+        packed_audio_paths: set[str] = set()
+
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(
                 "draft_content.json",
@@ -235,8 +243,25 @@ class JianyingDraftExporter(DraftExporter):
             )
             zf.writestr("materials/README.txt", self._make_readme())
 
+            # Pack TTS audio files referenced in narration track
+            for sentence in sentences:
+                audio_rel = sentence.get("audio_path", "")
+                if not audio_rel or audio_rel in packed_audio_paths:
+                    continue
+                audio_abs = job_dir / audio_rel
+                if audio_abs.exists():
+                    zf.write(audio_abs, arcname=f"materials/{audio_abs.name}")
+                    packed_audio_paths.add(audio_rel)
+                    logger.debug("[jianying] packed TTS: materials/%s", audio_abs.name)
+                else:
+                    logger.warning("[jianying] TTS file missing, skipping: %s", audio_abs)
+
         track_counts = {t["id"]: len(t["segments"]) for t in draft_content["tracks"]}
-        logger.info("[jianying] fallback zip written: %s (%d tracks)", zip_path, len(draft_content["tracks"]))
+        zip_size_kb = zip_path.stat().st_size / 1024
+        logger.info(
+            "[jianying] fallback zip written: %s (%d tracks, %d TTS files, %.1f KB)",
+            zip_path, len(draft_content["tracks"]), len(packed_audio_paths), zip_size_kb,
+        )
 
         return ExportResult(
             output_path=zip_path,

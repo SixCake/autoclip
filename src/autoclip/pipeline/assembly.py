@@ -29,17 +29,22 @@ _DURATION_DEVIATION_WARN_THRESHOLD = 0.20  # 20%
 
 
 def _load_sentences_from_timeline(timeline: dict) -> list[dict]:
-    """Extract ordered sentence list from timeline.json narrative_ir paragraphs."""
+    """Extract ordered sentence list from timeline.json narrative_ir paragraphs.
+
+    sentence_idx in timeline.json is paragraph-local (resets to 0 per paragraph).
+    We reassign a monotonically increasing global_idx so each sentence gets its
+    own TTS file (tts_0000.wav, tts_0001.wav, ...).
+    """
     sentences: list[dict] = []
     narrative_ir = timeline.get("narrative_ir", {})
+    global_idx = 0
     for paragraph in narrative_ir.get("paragraphs", []):
         for sentence in paragraph.get("sentences", []):
             sentences.append({
-                "sentence_idx": sentence["sentence_idx"],
+                "sentence_idx": global_idx,
                 "text": sentence["text"],
             })
-    # Sort by sentence_idx to guarantee order
-    sentences.sort(key=lambda s: s["sentence_idx"])
+            global_idx += 1
     return sentences
 
 
