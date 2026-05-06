@@ -1,14 +1,20 @@
 """Zero-knowledge cleanup — delete raw video files after pipeline completion.
 
 K9 contract (design.md §16.5):
-- normalized.mp4 + temp/ deleted immediately after Render stage succeeds
+- normalized.mp4 + source.mp4 + temp/ deleted immediately after Render stage succeeds
 - output/*.zip deleted 24h after creation (cron job)
 - Deletions logged to audit log (filename + size + reason, no content)
+
+Session 34: cleanup is now gated by the AUTOCLIP_CLEANUP_ENABLED env var.
+Default OFF — operators flip it on per-deployment when zero-knowledge
+guarantees are required. When OFF, ALL artifacts (source.mp4, normalized.mp4,
+tts/, temp/) are kept; only the audit-log line "CLEANUP_DISABLED" is written.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from datetime import UTC, datetime
@@ -18,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 _AUDIT_LOG_FILENAME = "audit.log"
 _OUTPUT_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
+_CLEANUP_ENABLED_ENV = "AUTOCLIP_CLEANUP_ENABLED"
+
+
+def _cleanup_enabled() -> bool:
+    """Read AUTOCLIP_CLEANUP_ENABLED env var. Default: False (cleanup OFF).
+
+    Truthy values: "1", "true", "yes", "on" (case-insensitive).
+    Anything else (including unset / empty) → False.
+    """
+    raw = os.environ.get(_CLEANUP_ENABLED_ENV, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _audit_log(job_dir: Path | None, message: str) -> None:
@@ -58,36 +75,33 @@ def _safe_delete_dir(path: Path, reason: str, job_dir: Path | None = None) -> bo
     return True
 
 
-def cleanup_after_render(job_dir: Path, *, preserve_source_video: bool = False) -> None:
+def cleanup_after_render(job_dir: Path) -> None:
     """Delete raw video files immediately after Render stage succeeds.
 
-    Deletes:
+    Gated by env var AUTOCLIP_CLEANUP_ENABLED (default OFF). When disabled,
+    all artifacts are preserved and a single CLEANUP_DISABLED audit line is
+    written. When enabled, deletes:
     - normalized.mp4 (large; created by ingest)
-    - source.mp4 (raw upload; kept during pipeline, deleted after export)
+    - source.mp4 (raw upload)
     - temp/ directory (intermediate files)
-
-    Args:
-        preserve_source_video: when True, source.mp4 is NOT deleted. Used by
-            the install-to-jianying branch (Session 33) where the local Jianying
-            draft references source.mp4 via absolute path; deleting it would
-            break the linked draft. normalized.mp4 + temp/ are always cleaned.
     """
+    if not _cleanup_enabled():
+        _audit_log(
+            job_dir,
+            f"CLEANUP_DISABLED env={_CLEANUP_ENABLED_ENV} reason=default_off",
+        )
+        logger.info(
+            "[cleanup] Skipped (AUTOCLIP_CLEANUP_ENABLED not set / falsy); "
+            "all artifacts preserved at %s",
+            job_dir,
+        )
+        return
+
     deleted_count = 0
-
-    files_to_delete = ["normalized.mp4"]
-    if not preserve_source_video:
-        files_to_delete.append("source.mp4")
-
-    for filename in files_to_delete:
+    for filename in ("normalized.mp4", "source.mp4"):
         target = job_dir / filename
         if _safe_delete_file(target, "post_render_cleanup", job_dir):
             deleted_count += 1
-
-    if preserve_source_video:
-        _audit_log(
-            job_dir,
-            "PRESERVE source.mp4 reason=installed_to_jianying (K10 双轨制 install branch)",
-        )
 
     temp_dir = job_dir / "temp"
     if _safe_delete_dir(temp_dir, "post_render_cleanup", job_dir):

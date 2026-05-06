@@ -2525,3 +2525,51 @@ v0.8.8 backlog 处理：P0 评分维度校准 + P1 非叙事题材 fallback + P2
 
 ### Commit
 - 待本会话结束时 commit
+
+---
+
+## 2026-05-06 (Session 34: Refactor — Cleanup 总开关 + 简化 Session 33 install 链路)
+
+### Trigger
+用户要求："本地素材不要删除，安全这块儿逻辑搞个开关，默认关闭"
+
+### Design Decisions (用户拍板)
+- **开关机制**：环境变量 `AUTOCLIP_CLEANUP_ENABLED`（运维侧统一控制；truthy: `1`/`true`/`yes`/`on`，大小写不敏感）
+- **默认值**：`false` — 关闭后整个 cleanup 不跑
+- **关闭后行为**：`source.mp4` + `normalized.mp4` + `temp/` + `tts/*` + 所有中间产物全部保留；只写一行 `CLEANUP_DISABLED` 审计日志
+- **Session 33 简化**：既然默认不清理，安装到剪映链路也不需要 `preserve_source_video` / `installed_to_jianying_at` 这层保护了 → 全部移除
+
+### Files Added
+- `tests/unit/test_cleanup_switch.py` — 23 个测试：env 解析（parametrized truthy/falsy）、OFF 默认行为、ON 显式删除、审计日志格式
+
+### Files Modified (Refactor — 净减少 ~67 LOC)
+- `src/autoclip/compliance/cleanup.py`
+  - 新增 `_cleanup_enabled()` 读 `AUTOCLIP_CLEANUP_ENABLED`，默认 false
+  - `cleanup_after_render()` 顶部 early-return + 写 `CLEANUP_DISABLED` 审计行
+  - 移除 `preserve_source_video` 参数（不再需要）
+- `src/autoclip/pipeline/render.py`
+  - 移除 `_check_installed_to_jianying()`（30 行，含 DB 查询子进程逻辑）
+  - cleanup 调用简化为 `cleanup_after_render(job_dir)`
+- `src/autoclip/models/job.py`
+  - 移除 `installed_to_jianying_at` 字段
+- `src/autoclip/db.py`
+  - 移除 `_auto_add_missing_nullable_columns()`（38 行 SQLite 自动 ALTER TABLE）
+  - `init_db()` 简化为单行 `Base.metadata.create_all(engine)`
+- `src/autoclip/api/jobs.py`
+  - 移除 `install_to_jianying` 路由里写 `installed_to_jianying_at` 的 4 行
+  - docstring 同步更新指向新设计（依赖 cleanup 默认 OFF 来保护原片）
+
+### Verification
+- `tests/unit/test_cleanup_switch.py`：23 passed in 0.03s ✅
+- `tests/unit/test_install_to_jianying.py`：10 passed（回归）✅
+- 全量 unit tests：**432 passed, 1 skipped in 3.12s** ✅
+- `read_lints`：0 errors ✅
+- `grep` 残留：`preserve_source_video` / `_check_installed_to_jianying` / `installed_to_jianying_at` / `_auto_add_missing_nullable_columns` 全部清零 ✅
+
+### Karpathy 准则自检
+- ✅ 简洁优先：Session 33 的复杂层（DB 字段 + 子进程查询 + 自动迁移 + 参数）一次性删除
+- ✅ 精准修改：只动 cleanup 的开关 + 直接相关的清理代码，没碰其他模块
+- ✅ 目标驱动：先定义可验证标准（env 解析正确 / OFF 不删 / ON 删 / lint 0 / 全量绿）→ 全部命中
+
+### Commit
+- 待本会话结束时 commit

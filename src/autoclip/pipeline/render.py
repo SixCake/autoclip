@@ -63,37 +63,6 @@ def _validate_no_absolute_paths(output_zip: Path) -> None:
                         )
 
 
-def _check_installed_to_jianying(job_dir: Path) -> bool:
-    """Read job_id from state.json, query DB to see if this job has been
-    installed to local Jianying drafts. Returns False on any error (safe
-    default: behave as the original cleanup would).
-    """
-    try:
-        state = JobStateFile(job_dir)
-        if not state.exists():
-            return False
-        state_data = state.load()
-        job_id = state_data.get("job_id")
-        if job_id is None:
-            return False
-
-        # render runs in a subprocess (spawn) — open a fresh engine + session.
-        from ..db import create_app_engine, make_session_factory, session_scope
-        from ..models import Job
-
-        engine = create_app_engine()
-        try:
-            factory = make_session_factory(engine)
-            with session_scope(factory) as sess:
-                job = sess.get(Job, job_id)
-                return job is not None and job.installed_to_jianying_at is not None
-        finally:
-            engine.dispose()
-    except Exception as exc:
-        logger.warning("[render] _check_installed_to_jianying failed: %s — assuming False", exc)
-        return False
-
-
 def _validate_track_counts(result: ExportResult) -> None:
     """Validate 4 tracks exist in export result."""
     required_tracks = {"main_video_track", "narration_track", "original_audio_track", "subtitle_track"}
@@ -149,14 +118,11 @@ def run_render(job_dir: Path) -> None:
     state.mark_stage(Stage.RENDER, StageStatus.RUNNING, progress=0.95)
 
     # --- Cleanup after render ---
-    # K10 双轨制 (Session 33): if user has installed this job to local Jianying
-    # drafts (POST /install-to-jianying), source.mp4 must be preserved because
-    # the local draft references it via absolute path. Detected by querying DB
-    # for Job.installed_to_jianying_at; falls back to False on any DB error.
-    preserve_source = _check_installed_to_jianying(job_dir)
+    # Session 34: cleanup is gated by AUTOCLIP_CLEANUP_ENABLED env var
+    # (default OFF). Operators flip it on for zero-knowledge deployments.
     try:
         from ..compliance.cleanup import cleanup_after_render
-        cleanup_after_render(job_dir, preserve_source_video=preserve_source)
+        cleanup_after_render(job_dir)
     except Exception as cleanup_err:
         logger.warning("[render] cleanup_after_render failed (non-fatal): %s", cleanup_err)
 

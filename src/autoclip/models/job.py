@@ -43,14 +43,6 @@ class Job(Base):
     # Reserved for M4.4 (regenerate count limit)
     regenerate_count: Mapped[int] = mapped_column(default=0, nullable=False)
 
-    # Session 33: install-to-jianying — when set, cleanup_after_render
-    # MUST NOT delete source.mp4 because the local Jianying draft references
-    # it via absolute path (K10 双轨制 — local install branch).
-    installed_to_jianying_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
     # Relationships
     video: Mapped["Video"] = relationship(back_populates="jobs")  # noqa: F821
     timeline: Mapped["Timeline | None"] = relationship(  # noqa: F821

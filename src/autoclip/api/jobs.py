@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import multiprocessing as mp
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -386,9 +385,11 @@ def install_to_jianying(
 
     This is the K10 双轨制 install branch: writes draft_content.json with
     absolute paths to the user's local source.mp4 + copies TTS wavs into
-    a per-job subfolder under the user's Jianying drafts root. Marks the job
-    so cleanup_after_render will not delete source.mp4 (otherwise Jianying
-    would open with broken media references).
+    a per-job subfolder under the user's Jianying drafts root.
+
+    Session 34: cleanup is gated globally by AUTOCLIP_CLEANUP_ENABLED env
+    (default OFF), so source.mp4 is preserved by default and the install
+    target stays valid without per-job tracking.
     """
     import json as _json
 
@@ -434,11 +435,6 @@ def install_to_jianying(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except JianyingExportError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
-
-    # 4) Mark job so cleanup_after_render preserves source.mp4
-    with session_scope(session_factory) as sess:
-        job = sess.get(Job, job_id)
-        job.installed_to_jianying_at = datetime.now(UTC)
 
     logger.info(
         "Job %d installed to Jianying drafts: %s (source_linked=%s, tts=%d)",

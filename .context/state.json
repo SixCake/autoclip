@@ -1,9 +1,9 @@
 {
   "project": "autoclip",
-  "version": "0.13.0-install-to-jianying",
+  "version": "0.13.1-cleanup-switch",
   "stage": "executing",
-  "phase": "M3+M4 完成 + Session 33: 安装到剪映链路上线 (K10 双轨制)",
-  "current_focus": "安装到剪映链路 E2E 验证完成；剩 MVP 手工 E2E 验收 (准备 fixture 视频跑 e2e_run.py + 评分)",
+  "phase": "M3+M4 完成 + Session 34: cleanup 总开关上线 (默认 OFF), 简化 Session 33 的 install 链路",
+  "current_focus": "cleanup 由 AUTOCLIP_CLEANUP_ENABLED 全局控制 (默认 OFF, 所有产物保留); 移除 Session 33 的 preserve_source_video / installed_to_jianying_at / _check_installed_to_jianying / _auto_add_missing_nullable_columns 复杂层",
   "design_doc": "docs/plans/2026-05-04-autoclip-design.md",
   "design_doc_lines": 2369,
   "design_doc_version": "v0.4 (Part IV §21-§24 latest) + v0.6 §17.4 target_duration_sec_estimate 字段演化表补充",
@@ -612,8 +612,8 @@
     }
   },
   "created_at": "2026-05-04T10:30:00+08:00",
-  "updated_at": "2026-05-06T11:33:58.657985+08:00",
-  "last_session": "Session 33 — Install-to-Jianying button: K10 双轨制 (download=placeholder, install=absolute path); new files: jianying.install_to_jianying_drafts/discover_jianying_drafts_dir, POST /jobs/{id}/install-to-jianying, Job.installed_to_jianying_at, cleanup preserve_source_video; 10 new unit tests passed; E2E browser click verified draft folder creation at ~/Movies/JianyingPro/.../com.lveditor.draft/autoclip_1_*",
+  "updated_at": "2026-05-06T11:56:29.893773+08:00",
+  "last_session": "Session 34 — Cleanup global switch: AUTOCLIP_CLEANUP_ENABLED env var (default OFF). Removed Session 33 install-protection layer (preserve_source_video param, installed_to_jianying_at DB column, _check_installed_to_jianying render hook, _auto_add_missing_nullable_columns DB auto-migrate). Net -67 LOC. 23 new switch tests + 10 install-jianying tests still pass; 432 passed 1 skipped overall.",
   "m3_m4_summary": {
     "commit": "aef52e3",
     "files_added": 33,
@@ -649,5 +649,30 @@
       "e2e_browser_click": "PASS — draft folder created at ~/Movies/JianyingPro/.../autoclip_1_20260506_033027/, abs paths verified, DB marked"
     },
     "env_var": "JIANYING_DRAFT_DIR (override drafts folder; defaults to macOS ~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft)"
+  },
+  "session_34_summary": {
+    "trigger": "用户要求: 本地素材不要删除, 安全这块儿逻辑搞个开关, 默认关闭",
+    "design_decisions": {
+      "switch_mechanism": "环境变量 AUTOCLIP_CLEANUP_ENABLED (运维侧统一控制)",
+      "default": "false (truthy: 1/true/yes/on, case-insensitive)",
+      "scope_when_off": "整个 cleanup 不跑 — source.mp4 + normalized.mp4 + temp/ + tts/ + 所有中间产物全保留",
+      "session_33_simplification": "移除 preserve_source_video 参数 + installed_to_jianying_at DB 字段 + _check_installed_to_jianying + _auto_add_missing_nullable_columns; 默认不删, 安装链路自然保护"
+    },
+    "files_added": [
+      "tests/unit/test_cleanup_switch.py (23 tests: env parsing parametrized, OFF default, ON deletes, audit log)"
+    ],
+    "files_modified": [
+      "src/autoclip/compliance/cleanup.py (+_cleanup_enabled() / +CLEANUP_DISABLED audit / -preserve_source_video param)",
+      "src/autoclip/pipeline/render.py (-_check_installed_to_jianying 30 行 / 简化 cleanup 调用)",
+      "src/autoclip/models/job.py (-installed_to_jianying_at 字段)",
+      "src/autoclip/db.py (-_auto_add_missing_nullable_columns 38 行)",
+      "src/autoclip/api/jobs.py (-写 installed_to_jianying_at 的 4 行)"
+    ],
+    "verification": {
+      "unit_tests": "432 passed, 1 skipped (含新增 23 个开关测试 + 原有 10 个 install-jianying 测试)",
+      "lint": "0 errors",
+      "code_simplification": "净减少 ~67 LOC (Session 33 的复杂层全部清理)"
+    },
+    "env_var": "AUTOCLIP_CLEANUP_ENABLED (default unset = OFF; set to 1/true/yes/on to enable post-render cleanup)"
   }
 }
