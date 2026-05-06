@@ -66,14 +66,16 @@ class Settings(BaseSettings):
         description="Dashscope API key for Tongyi Qianwen.",
     )
 
-    # === Volcengine TTS (火山豆包) ===
-    volcengine_tts_token: SecretStr = Field(
-        default=SecretStr(""),
-        description="Volcengine TTS access token.",
-    )
-    volcengine_tts_app_id: SecretStr = Field(
-        default=SecretStr(""),
-        description="Volcengine TTS app ID.",
+    # === Qwen-TTS (Session 35: 替换 Volcengine, 复用 dashscope_api_key) ===
+    # Qwen-TTS shares the same DashScope API key as the LLM (Tongyi Qianwen).
+    # Voice ↔ content matching is configured at: providers/tts/voice_map.py
+    # Style instructions are built at:           providers/tts/instructions.py
+    qwen_tts_model: str = Field(
+        default="qwen3-tts-instruct-flash",
+        description=(
+            "Qwen-TTS model name. instruct variant is required for the "
+            "instructions parameter (style/语速/情感 control)."
+        ),
     )
 
     # === Pipeline ===

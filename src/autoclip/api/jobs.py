@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import multiprocessing as mp
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -330,7 +331,7 @@ def regenerate_job(
         shutil.rmtree(output_dir)
 
     # Reset SCRIPT/ASSEMBLY/RENDER stages to PENDING in state.json
-    from ..pipeline.state import Stage, StageState, StageStatus
+    from ..pipeline.state import Stage, StageState
     current = state.load()
     for stage_name in (Stage.SCRIPT.value, Stage.ASSEMBLY.value, Stage.RENDER.value):
         current["stages"][stage_name] = StageState().to_dict()

@@ -2716,3 +2716,127 @@ def transcribe(audio_path: Path, language: str = "zh") -> ASRResult:
 - **总计**：0.9d
 
 **回滚策略**：若 v0.8 实施后发现 personas 质量不足，可走 OQ2 选项 B（架构先行，personas 用最小可用集）应急。
+
+---
+
+## §25 Qwen-TTS 声音匹配（Session 35）
+
+**版本**：v0.7（2026-05-06 Session 35）
+
+**前置上下文**：M3.1 引入了 `TTSProvider` 抽象 + `VolcengineTTSProvider`（火山豆包）。Session 35 完全替换为 Qwen-TTS（DashScope `qwen3-tts-instruct-flash`），并落地"persona/style → 音色 + 自然语言指令"的匹配层。
+
+### 25.1 决策树（5 个 brainstorming Q）
+
+| 问题 | 决策 | 理由 |
+|---|---|---|
+| Q1 与 Volcengine 关系 | **A 完全替换** | 单 provider 简洁；fallback 在 Qwen-TTS 内部以 stub 重建 |
+| Q2 模型选型 | **B `qwen3-tts-instruct-flash`** | instructions 自然语言控制是声音匹配的核心红利；放弃方言音色（autoclip 题材几乎不用） |
+| Q3 音色池规模 | **B 6 音色 1:1 固定映射** | persona_id → voice_id 是纯函数，可预期/可审计/可灰度；表现力靠 instructions 撑 |
+| Q4 映射表产生方式 | **A 描述语义匹配，直接拍板** | 选错成本极低（改一行字典）；试听校准放到上线后做 |
+| Q5 模型 / instructions 模板 | persona base + style overlay 拼接 | 中文 ≤ 400 字符（远低于 1600 token 上限） |
+
+### 25.2 模块拓扑
+
+```
+src/autoclip/providers/tts/
+├── base.py              # TTSProvider ABC + TTSResult/TTSSegment
+│                        # + create_silent_wav / estimate_stub_duration / probe_duration（共享工具）
+├── qwen.py              # QwenTTSProvider (dashscope.MultiModalConversation.call + 3 次 retry + stub fallback)
+├── voice_map.py         # PERSONA_TO_VOICE: dict[str, str]（6+1 兜底）
+├── instructions.py      # build_instructions(persona_id, style_preset) -> str
+└── __init__.py          # 导出全部公共符号
+
+src/autoclip/pipeline/assembly.py
+  ↓ 读 timeline.json.recommended_persona.persona_id + state.json.style_preset
+  ↓ select_voice(persona_id) → voice_id
+  ↓ build_instructions(persona_id, style_preset) → instructions
+  ↓ QwenTTSProvider().synthesize_batch(sentences, tts_dir, voice_id, instructions)
+  → 写 assembly.json（含 voice_id / voice_display_name / persona_id / style_preset / instructions 审计字段）
+```
+
+### 25.3 Persona → Voice 映射表
+
+| persona_id | persona 中文名 | voice_id | voice 中文名 | 匹配理由 |
+|---|---|---|---|---|
+| `archaeologist` | 考古学家 | `Elias` | 墨讲师 | 学科严谨 + 叙事化讲解 |
+| `empathy_senior` | 共情学姐 | `Maia` | 四月 | 知性与温柔的碰撞 |
+| `healing_big_sister` | 治愈大姐 | `Seren` | 小婉 | 唯一明确"治愈"定位的音色 |
+| `rage_brother` | 暴躁老哥 | `Vincent` | 田叔 | 沙哑烟嗓 + 江湖豪情 |
+| `sarcastic_gen_z` | 讽刺 Z 世代 | `Vivian` | 十三 | 拽 + 可爱小暴躁 |
+| `toxic_middle_aged` | 毒舌中年 | `Eldric Sage` | 沧明子 | 沧桑睿智 + 看透世事 |
+| **fallback** | （任意未知/None） | `Ethan` | 晨煦 | 中性安全的阳光暖男声 |
+
+**调优入口**：`src/autoclip/providers/tts/voice_map.py` 单文件、单字典。改一行 → 重跑测试 → 完成。
+
+### 25.4 Instructions 组合规则
+
+`build_instructions(persona_id, style_preset)` 返回值由两部分拼接：
+
+```
+{persona_base}  {style_overlay}
+```
+
+**persona_base**（6 行常量字典 `_PERSONA_INSTRUCTIONS`）—— 描述音色基线性格 + 节奏 + 用途：
+> 例 `rage_brother`：「语速偏快，音量略高，带有明显的情绪起伏与江湖豪迈感，像一位仗义执言的老哥在激动地点评。」
+
+**style_overlay**（3 行常量字典 `_STYLE_OVERLAYS`）—— 内容风格修饰：
+- `default` → 空字符串（不附加）
+- `humor_roast` → 「整体节奏更快一些，重音更鲜明，带出俏皮和锐利的吐槽感。」
+- `serious_review` → 「整体放缓节奏，重音更稳重，带出客观和深度分析的质感。」
+
+**容错语义**（永不抛异常）：
+- 未知 / None / 空字符串 persona_id → fallback 到中性默认指令（"友好的解说员"）
+- 未知 / None / "default" style_preset → 仅返回 persona_base
+- 全量参数化测试覆盖 6 persona × 4 style 共 24 组合
+
+### 25.5 配置矩阵
+
+| Env Var | 默认值 | 说明 |
+|---|---|---|
+| `DASHSCOPE_API_KEY` | （必填）| 同时被 Tongyi LLM 和 Qwen-TTS 复用，单 key 双用 |
+| `QWEN_TTS_MODEL` | `qwen3-tts-instruct-flash` | 仅当 A/B 测试不同快照时覆盖 |
+
+**已删除**：`VOLCENGINE_TTS_TOKEN`、`VOLCENGINE_TTS_APP_ID`、`Settings.volcengine_tts_token`、`Settings.volcengine_tts_app_id`，`test_no_legacy_volcengine_fields` 防回归断言已加。
+
+### 25.6 失败模式（双层 stub fallback）
+
+| 触发条件 | 行为 | provider.name |
+|---|---|---|
+| 无 `DASHSCOPE_API_KEY` | 全程 silent WAV，零 API 调用 | `qwen-tts-stub` |
+| 单句 API 调用失败（3 次 retry 后） | 该句写 silent WAV，整体 pipeline 不阻塞 | `qwen-tts`（其他句子正常 url 下载） |
+| 网络下载失败 | 同上（last-resort silent WAV） | `qwen-tts` |
+
+**核心准则**：assembly stage **永远不会因 TTS 失败而 FAILED**。下游 jianying 拼装可以正常打包（缺失部分静默），用户视觉/字幕仍可用，体验降级而非中断。
+
+### 25.7 assembly.json schema 增量字段
+
+```json
+{
+  "total_tts_duration_sec": 23.5,
+  "target_duration_sec": 60,
+  "tts_provider": "qwen-tts" | "qwen-tts-stub",
+  "voice_id": "Vincent",                       // ← 新增
+  "voice_display_name": "田叔",                 // ← 新增
+  "persona_id": "rage_brother" | null,         // ← 新增
+  "style_preset": "humor_roast",               // ← 新增
+  "instructions": "语速偏快...俏皮和锐利的吐槽感。",  // ← 新增（审计用）
+  "sentences": [...]
+}
+```
+
+> **add-only schema 原则**（沿用 v0.8.6 timeline.json 准则）：assembly.json 顶层字段 add-only-never-modify，消费方需 `if "voice_id" in assembly` 守卫，避免与历史 jobs 不兼容。
+
+### 25.8 Consequences
+
+**正面**：
+- ✅ 单 API key（DashScope）覆盖 LLM + TTS，凭据管理面收敛 -50%
+- ✅ persona/style → voice/instructions 是 2 个纯函数，单测覆盖 100%（28 + 24 + 11 = 63 个新单测）
+- ✅ instructions 控制语速/情感无需调参数，自然语言即可（humor_roast 自动加速）
+- ✅ stub fallback 双层防御，pipeline 永不因 TTS 失败而 FAILED
+
+**负面**：
+- ❌ 不再支持方言音色（南京/陕西/天津/闽南/粤语等仅在 flash 非 instruct 版可用）
+- ❌ 同一 job 所有句子共用一个 voice + instructions（v0.7 不做"对话角色多音色切换"）
+- ❌ 人格相近的 voice（Maia 知性温柔 vs Seren 治愈）听感差异不大，长视频可能有"换人但声音差不多"感
+
+**回滚策略**：若上线后某 persona 听感差，改 `voice_map.py` 一行常量 → `pytest tests/unit/test_voice_map.py` → 完成。无需触碰任何业务代码。

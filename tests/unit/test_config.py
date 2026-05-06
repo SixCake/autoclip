@@ -13,8 +13,7 @@ def test_settings_loads_from_env(monkeypatch, tmp_path):
     monkeypatch.setenv("WHISPER_DEVICE", "cpu")
     monkeypatch.setenv("WHISPER_COMPUTE_TYPE", "int8")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test123")
-    monkeypatch.setenv("VOLCENGINE_TTS_TOKEN", "tts_token")
-    monkeypatch.setenv("VOLCENGINE_TTS_APP_ID", "tts_app_id")
+    monkeypatch.setenv("QWEN_TTS_MODEL", "qwen3-tts-instruct-flash")
     monkeypatch.setenv("MAX_CONCURRENT_JOBS", "3")
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
 
@@ -25,8 +24,7 @@ def test_settings_loads_from_env(monkeypatch, tmp_path):
     assert settings.whisper_device == "cpu"
     assert settings.whisper_compute_type == "int8"
     assert settings.dashscope_api_key.get_secret_value() == "sk-test123"
-    assert settings.volcengine_tts_token.get_secret_value() == "tts_token"
-    assert settings.volcengine_tts_app_id.get_secret_value() == "tts_app_id"
+    assert settings.qwen_tts_model == "qwen3-tts-instruct-flash"
     assert settings.max_concurrent_jobs == 3
     assert settings.log_level == "DEBUG"
 
@@ -53,15 +51,14 @@ def test_data_dir_auto_created(monkeypatch, tmp_path):
 def test_secrets_are_secret_str():
     """All credentials must be wrapped in SecretStr (no accidental logging).
 
-    Note: whisper_* fields are plain str (no credentials, just config).
+    Note: whisper_* and qwen_tts_model are plain str (no credentials, just config).
     """
     settings = Settings(_env_file=None)
     assert isinstance(settings.dashscope_api_key, SecretStr)
-    assert isinstance(settings.volcengine_tts_token, SecretStr)
-    assert isinstance(settings.volcengine_tts_app_id, SecretStr)
-    # whisper_* are plain str (no secret semantics)
+    # whisper_* + qwen_tts_model are plain str (no secret semantics)
     assert isinstance(settings.whisper_model_size, str)
     assert isinstance(settings.whisper_device, str)
+    assert isinstance(settings.qwen_tts_model, str)
 
 
 def test_no_legacy_aliyun_asr_fields():
@@ -73,6 +70,23 @@ def test_no_legacy_aliyun_asr_fields():
     assert not hasattr(settings, "aliyun_asr_token"), (
         "aliyun_asr_token was removed in v0.4 (Part IV §21)"
     )
+
+
+def test_no_legacy_volcengine_fields():
+    """Session 35: volcengine_tts_* fields removed when swapping to Qwen-TTS."""
+    settings = Settings(_env_file=None)
+    assert not hasattr(settings, "volcengine_tts_token"), (
+        "volcengine_tts_token removed in Session 35 (replaced by Qwen-TTS)"
+    )
+    assert not hasattr(settings, "volcengine_tts_app_id"), (
+        "volcengine_tts_app_id removed in Session 35 (replaced by Qwen-TTS)"
+    )
+
+
+def test_qwen_tts_model_default():
+    """Default Qwen-TTS model must be the instruct variant (Session 35)."""
+    settings = Settings(_env_file=None)
+    assert settings.qwen_tts_model == "qwen3-tts-instruct-flash"
 
 
 def test_max_concurrent_jobs_validation(monkeypatch):
