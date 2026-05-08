@@ -37,7 +37,6 @@ from autoclip.algo.narrative_ir import (
 )
 from autoclip.algo.persona_inferer import PersonaInferenceResult
 
-
 # === Fixtures ===
 
 

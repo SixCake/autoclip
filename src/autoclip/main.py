@@ -21,11 +21,9 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import jobs_router

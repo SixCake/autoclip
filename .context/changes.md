@@ -2678,3 +2678,97 @@ User instruction: "接入qwen-tts，不实用字节的。帮我设计下声音�
 1. **历史 e2e 失败修复** (1h adhoc): Session 33 引入的 `installed_to_jianying_at` POST 响应结构变更, 导致 test_list_jobs_returns_newest_first / test_cancel_job_writes_cancel_signal 两个测试找不到 'job_id' key
 2. **真机听感校准** (M5.x voice tuning): 6 个 persona × N 部真实视频跑 demo, 验证 Maia (知性温柔) vs Seren (治愈) 听感差异度是否够; 必要时调整映射
 3. **dashscope SDK 升级核对**: 当前 pyproject.toml 未显式锁 dashscope 版本, Qwen-TTS 文档要求 ≥1.24.6 — 后续 commit 应加 dependency 约束
+
+---
+
+## Session 35 — 2026-05-06 11:11 ~ 13:09 (jianying.py 重写 + 真实剪映打不开根因诊断)
+
+### Trigger
+用户跑 jobs/1 后发现导出的剪映草稿在剪映里报"草稿内容已损坏"，质问"之前方案设计的就是用 pyJianYingDraft，为啥实现的时候没用"。调查发现 Session 30 的 jianying.py 把 import 名写错（小写 `pyjianyingdraft` vs 驼峰 `pyJianYingDraft`），永远走 fallback zip 路径。
+
+### Brainstorming（用户决策）
+- Q1（保不保留 fallback zip）：**不保留** → 删 fallback，两条链路都走 pyJianYingDraft
+- Q2（隐私 / 文件位置）：**本机跑，不要再问**
+- Q3（MVP 范围）：**只做 main_video + narration 两条核心轨**（字幕 + 降原音延后用户编辑）
+
+### Implementation（J 系列 J1-J7）
+
+**J1 - J5（jianying.py 全量重写）**:
+- 删: `_try_import_pyjianyingdraft` / `_build_draft_content` / `_build_draft_meta` / `_export_with_library` / `_export_fallback_zip` / `_write_draft_meta`
+- 新增 helpers: `_resolve_video_source` (3 级 fallback 链 source.mp4 → normalized_hd.mp4 → normalized_low.mp4) / `_materialize_assets` (统一拷贝媒体到 draft_dir, 保留原始文件名) / `_populate_script` (接受 caller 传入的 ScriptFile, 添加 tracks/segments)
+- 重写: `JianyingDraftExporter.export()` (DOWNLOAD 链路) / `install_to_jianying_drafts()` (INSTALL 链路) — 两条链路都改用 `pyJianYingDraft.DraftFolder.create_draft()` 复制官方 meta template
+- 顶部 import: `import pyJianYingDraft as jy` (驼峰修正)
+- K10 双轨制 path 策略 (`materials_use_basename`):
+  * DOWNLOAD: `materials.*.path = basename` → 解压到任意目录, Jianying 同目录 sibling resolve
+  * INSTALL: `materials.*.path = absolute` → Jianying 永不移动文件, 路径稳定
+- timeline 越界 clamp: 修真实数据 13ms 微秒级漂移导致 pyJianYingDraft 抛"截取的素材时间范围超出了素材时长"
+
+**J6（真实数据导出验证 ✅ 通过）**:
+- jobs/1 重跑: 26.22 MB zip, 14 文件, video 11 段 + narration 11 段, duration 186.50s
+- materials.videos[0].path = "normalized_hd.mp4" (basename)
+- materials.audios[*].path = "tts_*.wav" (basename)
+- draft_meta_info.json 字段数: 31 (官方 template, 含 draft_materials/draft_enterprise_info/tm_duration)
+
+**J7（用户手动验证剪映打开 ❌ 阻塞 — 根本性兼容问题）**:
+
+用户机器: 剪映专业版 v10.5.0 (macOS)
+
+两轮验证均失败:
+- 第 1 轮: 报"草稿损坏" → 怀疑 meta 字段不全 → 改用 `DraftFolder.create_draft()` 复制官方 31 字段 template
+- 第 2 轮: 仍报"草稿损坏" → 收集决定性证据:
+
+| 证据 | 详情 |
+|---|---|
+| 剪映原生草稿 (`.recycle_bin/5月6日/`) | 内容文件名: **`draft_info.json` (加密二进制)**, 同时有 `draft_info.json.bak` / `draft_settings` (INI) / `draft_cover.jpg` / `draft_agency_config.json` / `draft_biz_config.json` / `draft_virtual_store.json` / `attachment_editing.json` / `attachment_pc_common.json` / `key_value.json` / `performance_opt_info.json` / `timeline_layout.json`, **共 14 文件** |
+| 我们写的草稿 (pyJianYingDraft) | 内容文件名: `draft_content.json` (明文 JSON), 仅 `draft_content.json + draft_meta_info.json + 媒体`, 共 3 文件 |
+| `root_meta_info.json` (剪映扫描索引) | 每个草稿条目里写 `"draft_json_file": ".../draft_info.json"` (**不是 draft_content.json**) |
+| 剪映原生 `draft_meta_info.json` | 2472 bytes 单行无换行, **非 base64 字符数 = 0**, `json.load` 解析失败 → 确认非明文 JSON |
+| 剪映原生 `draft_info.json` | 1160 bytes 单行, **非 base64 字符数 = 0**, base64 解码后是真二进制乱码 (含大量 `\xff \xc2` 高位字节, 非嵌套 JSON) → 确认是 base64 包装的二进制加密内容 |
+| pyJianYingDraft 版本 | 0.2.6 (PyPI 元信息未声明剪映版本上限, 但实测在 v10.5.0 上写出的明文 `draft_content.json` 不被识别) |
+| 历史草稿 | 5 个 `autoclip_*` 全部已被用户删进 `.recycle_bin` (说明 J7 之前的所有版本都打不开) |
+
+### 根因结论 (有强证据)
+
+**剪映专业版 v10.5.0 (用户机器实测) 的草稿格式与 pyJianYingDraft 0.2.6 写出的明文 JSON 格式不兼容**:
+- 内容文件名: 剪映期望 `draft_info.json`, 我们写的是 `draft_content.json` (root_meta_info.json 索引明确指向 `draft_json_file: .../draft_info.json`)
+- 内容编码: 剪映原生 `draft_info.json` + `draft_meta_info.json` 都是 base64 包装的二进制内容 (非明文 JSON, 也非 minified JSON), 我们写的是明文 JSON
+- 配套文件: 剪映原生草稿 14 文件 (含 draft_settings INI / draft_cover.jpg / draft_agency_config.json / draft_biz_config.json / draft_virtual_store.json / 4 个 attachment_*.json / draft_info.json.bak), 我们写的 3 文件
+
+**证据强度说明**: 加密判定基于 1 个原生样本 (`.recycle_bin/5月6日/`) + root_meta_info.json 索引的内部一致性。具体加密算法 (AES? 自定义?) 未做逆向。建议下次会话用第 2 个原生样本交叉验证 (用户随便在剪映里建一个新空白草稿即可)。
+
+**pyJianYingDraft 0.2.6 写出的明文 `draft_content.json` 在用户的剪映 v10.5.0 上扫不到** → 直接判"草稿损坏"。这是**库与剪映特定版本的兼容性阻塞**, 不是 autoclip 代码能修复的。
+
+### Verification
+
+- 17 jianying 单测全过 (test_jianying_exporter.py 8 + test_install_to_jianying.py 9)
+- jobs/1 真实数据导出 ✅ (zip 26.22 MB, 内部结构正确)
+- 剪映 v10.5.0 真机打开 ❌ (两条链路都损坏)
+- ruff lint 0 errors
+- 全量 unit: test_config.py 2 失败但与 J 系列无关 (Volcengine→Qwen TTS 迁移 dirty 状态遗留)
+
+### Karpathy 准则应用 (含失败教训)
+
+- **简洁优先 ✅**: 删除 ~150 LOC 旧 fallback 代码, 两条链路统一走 pyJianYingDraft + DraftFolder
+- **精准修改 ✅**: 本次改动集中在 jianying.py + 2 测试文件, 拒绝顺手修 test_config.py 2 个无关失败
+- **目标驱动 ⚠️ 部分失败**: J7 成功标准定义为"剪映能打开", 但因外部库版本兼容性不可控, 第二轮 fix 仍然失败。**教训**: 应在 J0/brainstorming 阶段先用最小用例验证库与用户机器的兼容性, 而不是先重写完整代码再去验证。
+- **显式暴露假设 ⚠️ 教训**: 整个 Session 默认了"pyJianYingDraft 兼容用户的剪映版本", 这个假设直到 J7 才被现实击碎。下次涉及第三方逆向工程库时, 必须**首条任务做 hello-world 兼容验证**。
+
+### J7 候选方案矩阵 (留给下次会话决策)
+
+| 方案 | 描述 | 工作量 | 风险 |
+|---|---|---|---|
+| **A. 降级剪映** | 用户装一个剪映 5.x / CapCut 老版本, install 链路直接能用 | ~1h (装包) | 老版本可能缺新功能, 用户体验降级 |
+| **B. 改用导入草稿(zip)** | 路径 A 还没验证, 剪映导入草稿可能内置格式转换器 | 0 (用户验一次即可确认) | 未知, 可能也不支持 |
+| **C. 等 pyJianYingDraft 升级** | 等社区跟进剪映 v10 加密格式 | 不可控 (可能数月) | 长期阻塞 MVP 交付 |
+| **D. 切到 CapCut** | CapCut (剪映海外版) 仍用明文 JSON, 是 pyJianYingDraft 一等公民 | ~1h (装 CapCut) | 用户需切换习惯, 中文功能可能少 |
+| **E. 放弃自动化, 输出 JsonTimelineExporter zip** | 用户在剪映里手动按 timeline.json 重建轨道 | 0 (M3.6 已完成) | 完全失去 install 链路 UX, 用户每次都要手工拼 |
+| **F. 自研 v10 加密格式逆向** | 抓包剪映 + 反编译, 自己实现加密算法 | 数周-数月 | 法律风险 + 技术风险高, 不推荐 |
+
+**推荐顺序**: B (0 成本试一次) → A 或 D (装个老版本绕过) → E (兜底)
+
+### Known Open Items (留给下次会话)
+
+1. **J7 路径 A 验证**: 用户解压 `/tmp/jianying_draft_check/autoclip_1/` 用剪映"导入草稿"是否能打开 (0 成本, 决定后续路线)
+2. **方案选择 brainstorming**: 上述 A-F 6 方案中选 1-2 落地
+3. **如选 A/D**: 需要降级剪映或装 CapCut, 测试 install 链路是否打通
+4. **历史 dirty 修复**: test_config.py 2 失败 (Volcengine→Qwen 迁移残留)

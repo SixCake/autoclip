@@ -12,16 +12,22 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from autoclip.algo.narrative_ir import NarrativeIR, NarrativeParagraph, NarrativeSentence
-from autoclip.prompts.style_presets.plot_summary import (
-    FEW_SHOT_EXAMPLE as _PLOT_SUMMARY_FEW_SHOT,
-    STYLE_DESCRIPTION as _PLOT_SUMMARY_STYLE,
-)
 from autoclip.prompts.style_presets.humor_roast import (
     FEW_SHOT_EXAMPLE as _HUMOR_ROAST_FEW_SHOT,
+)
+from autoclip.prompts.style_presets.humor_roast import (
     STYLE_DESCRIPTION as _HUMOR_ROAST_STYLE,
+)
+from autoclip.prompts.style_presets.plot_summary import (
+    FEW_SHOT_EXAMPLE as _PLOT_SUMMARY_FEW_SHOT,
+)
+from autoclip.prompts.style_presets.plot_summary import (
+    STYLE_DESCRIPTION as _PLOT_SUMMARY_STYLE,
 )
 from autoclip.prompts.style_presets.serious_review import (
     FEW_SHOT_EXAMPLE as _SERIOUS_REVIEW_FEW_SHOT,
+)
+from autoclip.prompts.style_presets.serious_review import (
     STYLE_DESCRIPTION as _SERIOUS_REVIEW_STYLE,
 )
 

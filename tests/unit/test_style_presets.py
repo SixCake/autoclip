@@ -2,24 +2,34 @@
 
 from __future__ import annotations
 
-import pytest
-
+from autoclip.prompts.narrative_ir import _STYLE_REGISTRY
 from autoclip.prompts.style_presets.humor_roast import (
     FEW_SHOT_EXAMPLE as HUMOR_EXAMPLE,
+)
+from autoclip.prompts.style_presets.humor_roast import (
     STYLE_DESCRIPTION as HUMOR_STYLE,
+)
+from autoclip.prompts.style_presets.humor_roast import (
     STYLE_NAME as HUMOR_NAME,
 )
 from autoclip.prompts.style_presets.plot_summary import (
     FEW_SHOT_EXAMPLE as PLOT_EXAMPLE,
+)
+from autoclip.prompts.style_presets.plot_summary import (
     STYLE_DESCRIPTION as PLOT_STYLE,
+)
+from autoclip.prompts.style_presets.plot_summary import (
     STYLE_NAME as PLOT_NAME,
 )
 from autoclip.prompts.style_presets.serious_review import (
     FEW_SHOT_EXAMPLE as SERIOUS_EXAMPLE,
+)
+from autoclip.prompts.style_presets.serious_review import (
     STYLE_DESCRIPTION as SERIOUS_STYLE,
+)
+from autoclip.prompts.style_presets.serious_review import (
     STYLE_NAME as SERIOUS_NAME,
 )
-from autoclip.prompts.narrative_ir import _STYLE_REGISTRY
 
 
 class TestStylePresetNames:

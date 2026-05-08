@@ -27,7 +27,6 @@ from autoclip.pipeline import scripting
 from autoclip.pipeline.scripting import (
     NarrativeIRError,
     NarrativeIRTooLargeError,
-    PlotOutlineError,
     ScriptingCancelledError,
     run_scripting,
 )

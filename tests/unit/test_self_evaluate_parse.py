@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import pytest
 
-from autoclip.prompts.self_evaluate import parse_self_evaluate_response, _fallback_evaluation
+from autoclip.prompts.self_evaluate import _fallback_evaluation, parse_self_evaluate_response
 
 
 class TestParseHappyPath:

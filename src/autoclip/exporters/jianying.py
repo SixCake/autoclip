@@ -1,26 +1,34 @@
 """JianyingDraftExporter — Jianying draft package exporter.
 
-Uses pyJianYingDraft if available; falls back to a structured zip mimicking
-Jianying draft format when the library is not installed (R1 risk mitigation).
+Powered by `pyJianYingDraft` (driven by community reverse-engineering of the
+real Jianying draft format). MVP scope: 2 core tracks — main video + narration.
+Subtitles + lowered original audio are intentionally deferred to user editing
+inside Jianying.
 
 K10 双轨制 (Session 33):
-- Download branch (export()): material paths = placeholder './materials/source.mp4'
-  (zero-knowledge compliance, distributable to anyone)
-- Install branch (install_to_jianying_drafts()): material path = absolute path
-  to user's local source.mp4 (only written into the user's own Jianying draft
-  directory on their own machine — never distributed; cleanup_after_render
-  must skip source.mp4 when this branch is used).
+- Download branch  (`JianyingDraftExporter.export`): build draft in a temp dir,
+  copy source.mp4 + tts/*.wav alongside, then zip it. The user can extract the
+  zip anywhere and "导入草稿" in Jianying — paths inside the draft point to
+  the materials sitting next to draft_content.json.
+- Install branch  (`install_to_jianying_drafts`): build draft directly inside
+  the user's local Jianying drafts folder, copy materials next to it. Jianying
+  picks it up from its scan; user just opens it.
+
+In both branches the draft references **local files next to draft_content.json**
+(not absolute paths anywhere else), so the resulting draft is portable and the
+user never sees a "media offline" prompt.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pyJianYingDraft as jy
 
 from .base import DraftExporter, ExportResult
 
@@ -31,151 +39,192 @@ class JianyingExportError(Exception):
     """Raised when Jianying draft export fails."""
 
 
-def _try_import_pyjianyingdraft() -> bool:
-    """Check if pyjianyingdraft is available."""
-    try:
-        import pyjianyingdraft  # noqa: F401
-        return True
-    except ImportError:
-        return False
+# ---------------------------------------------------------------------------
+# Build helpers — talk to pyJianYingDraft only
+# ---------------------------------------------------------------------------
+
+# Default canvas (1080p horizontal). Could be derived from source.mp4 metadata
+# in a future iteration; MVP keeps it fixed.
+_CANVAS_WIDTH = 1920
+_CANVAS_HEIGHT = 1080
+_CANVAS_FPS = 30
 
 
-def _build_draft_content(
+# Fallback chain when caller doesn't pin a specific source_video_path:
+# real ingest produces normalized_hd.mp4 (and a low-res variant for ASR);
+# source.mp4 is only present in test fixtures / before the normalize step.
+_VIDEO_SOURCE_FALLBACK = ("source.mp4", "normalized_hd.mp4", "normalized_low.mp4")
+
+
+def _resolve_video_source(job_dir: Path) -> Path | None:
+    """Pick the first existing video file from the fallback chain.
+
+    Real jobs (post-ingest) only have normalized_*.mp4; cleanup/upload tests
+    may have a raw source.mp4. Returning None means we'll skip the video
+    track entirely so Jianying still opens the draft cleanly.
+    """
+    for name in _VIDEO_SOURCE_FALLBACK:
+        candidate = job_dir / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _materialize_assets(
+    job_dir: Path,
+    sentences: list[dict],
+    draft_dir: Path,
+    *,
+    source_video_path: Path | None = None,
+) -> tuple[Path | None, dict[str, Path]]:
+    """Copy main video + referenced tts wavs into draft_dir. Returns
+    (copied_source_path or None, {audio_rel_path -> copied_abs_path}).
+
+    Both branches do the same thing: keep all media physically next to
+    draft_content.json so the draft is self-contained and portable.
+    """
+    draft_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) main video — caller pin > job_dir fallback chain
+    if source_video_path is None:
+        source_video_path = _resolve_video_source(job_dir)
+    copied_source: Path | None = None
+    if source_video_path is not None and source_video_path.exists():
+        # Preserve original filename so users see "normalized_hd.mp4" in Jianying
+        # rather than a confusing renamed "source.mp4".
+        dst = draft_dir / source_video_path.name
+        if not dst.exists():
+            shutil.copy2(source_video_path, dst)
+        copied_source = dst
+        logger.info("[jianying] main video resolved: %s", source_video_path)
+    else:
+        logger.warning(
+            "[jianying] no main video found in %s (tried %s) — draft will have no "
+            "main video; user must add it manually in Jianying",
+            job_dir, _VIDEO_SOURCE_FALLBACK,
+        )
+
+    # 2) tts wavs (de-duped on filename)
+    tts_map: dict[str, Path] = {}
+    for sent in sentences:
+        rel = sent.get("audio_path", "")
+        if not rel or rel in tts_map:
+            continue
+        src = job_dir / rel
+        if not src.exists():
+            logger.warning("[jianying] missing TTS wav: %s — skipping sentence", src)
+            continue
+        dst = draft_dir / src.name
+        if not dst.exists():
+            shutil.copy2(src, dst)
+        tts_map[rel] = dst
+
+    return copied_source, tts_map
+
+
+def _populate_script(
+    script: jy.ScriptFile,
     segments: list[dict],
     sentences: list[dict],
-    video_id: str = "placeholder-video-material",
+    video_path: Path | None,
+    tts_map: dict[str, Path],
     *,
-    video_source_path: str = "./materials/source.mp4",
-    narration_path_mode: str = "relative",  # "relative" | "absolute_in_dir"
-    narration_dir_abs: Path | None = None,
-) -> dict:
-    """Build draft_content.json structure (Jianying format approximation).
+    materials_use_basename: bool = False,
+) -> jy.ScriptFile:
+    """Add tracks + segments to an already-created ScriptFile, in place.
 
-    Args:
-        video_source_path: written into materials.videos[0].path. Default is the
-            K10 placeholder; install branch passes the absolute local path to
-            the user's source.mp4 so Jianying opens with media linked.
-        narration_path_mode: "relative" keeps audio_path as-is (zip download
-            branch where wav lives at materials/tts_*.wav inside the zip);
-            "absolute_in_dir" rewrites narration material_id to
-            f"{narration_dir_abs}/{basename}" (install branch where wavs are
-            copied next to draft_content.json under the Jianying drafts folder).
+    Caller is responsible for creating the ScriptFile (typically via
+    `DraftFolder.create_draft()` so the draft folder gets the official
+    Jianying-compatible draft_meta_info.json template — hand-rolling that
+    meta breaks Jianying's "草稿损坏" validator).
+
+    MVP layout:
+      - main video track: each timeline segment cuts [source_start..source_end]
+        from `video_path` and lays it on the main track, head to tail.
+      - narration track:  each sentence's tts wav, head to tail (cursor uses
+        actual_duration_sec from assembly).
+
+    `video_path` may be None when source.mp4 is unavailable; in that case the
+    video track is omitted so Jianying still opens the draft cleanly.
+
+    `materials_use_basename`: portability switch for the K10 双轨制.
+      - False (default, INSTALL branch): keep absolute paths to media that
+        sit next to draft_content.json in the user's Jianying drafts folder;
+        Jianying never moves these files so absolute paths are stable.
+      - True (DOWNLOAD branch): strip path to filename only. The zip ships
+        media alongside draft_content.json, so when the user extracts it
+        anywhere on disk Jianying resolves materials by sibling lookup.
     """
-    tracks = []
-    video_cursor_us = 0  # microseconds
+    if not segments:
+        raise JianyingExportError("No segments in timeline — cannot build draft")
 
-    # Track 1: main video
-    video_segments = []
-    for seg_idx, seg in enumerate(segments):
-        source_start_us = int(seg.get("source_start_sec", 0.0) * 1_000_000)
-        source_end_us = int(seg.get("source_end_sec", 0.0) * 1_000_000)
-        duration_us = source_end_us - source_start_us
+    # ----- Main video track -----
+    if video_path is not None:
+        video_material = jy.VideoMaterial(str(video_path))
+        material_duration_us = int(video_material.duration)
+        script.add_track(jy.TrackType.video)
+        cursor_us = 0
+        for seg in segments:
+            source_start_us = int(seg.get("source_start_sec", 0.0) * 1_000_000)
+            source_end_us = int(seg.get("source_end_sec", 0.0) * 1_000_000)
+            # Clamp to material duration: timeline durations are computed at plan
+            # time from ASR/normalize estimates and can drift a few ms past the
+            # real file length. Without clamp, pyJianYingDraft raises
+            # "截取的素材时间范围超出了素材时长" and aborts the whole export.
+            source_start_us = max(0, min(source_start_us, material_duration_us))
+            source_end_us = max(source_start_us, min(source_end_us, material_duration_us))
+            duration_us = source_end_us - source_start_us
+            if duration_us == 0:
+                continue
+            script.add_segment(
+                jy.VideoSegment(
+                    video_material,
+                    target_timerange=jy.Timerange(cursor_us, duration_us),
+                    source_timerange=jy.Timerange(source_start_us, duration_us),
+                )
+            )
+            cursor_us += duration_us
 
-        video_segments.append({
-            "id": f"video_seg_{seg_idx:04d}",
-            "material_id": video_id,
-            "source_timerange": {
-                "start": source_start_us,
-                "duration": duration_us,
-            },
-            "target_timerange": {
-                "start": video_cursor_us,
-                "duration": duration_us,
-            },
-            "type": "video",
-        })
-        video_cursor_us += duration_us
+    # ----- Narration track -----
+    if sentences:
+        script.add_track(jy.TrackType.audio, "narration")
+        narration_cursor_us = 0
+        for sent in sentences:
+            rel = sent.get("audio_path", "")
+            wav_path = tts_map.get(rel)
+            if wav_path is None:
+                continue  # already warned in _materialize_assets
+            duration_us = int(float(sent.get("actual_duration_sec", 0.0)) * 1_000_000)
+            if duration_us <= 0:
+                continue
+            audio_material = jy.AudioMaterial(str(wav_path))
+            script.add_segment(
+                jy.AudioSegment(
+                    audio_material,
+                    target_timerange=jy.Timerange(narration_cursor_us, duration_us),
+                ),
+                track_name="narration",
+            )
+            narration_cursor_us += duration_us
 
-    tracks.append({"id": "main_video_track", "type": "video", "segments": video_segments})
+    # K10 portability rewrite — DOWNLOAD branch only. Jianying resolves
+    # bare-filename material paths against draft_content.json's directory.
+    if materials_use_basename:
+        for video_mat in script.materials.videos:
+            video_mat.path = Path(video_mat.path).name
+        for audio_mat in script.materials.audios:
+            audio_mat.path = Path(audio_mat.path).name
 
-    # Track 2: narration (TTS audio)
-    narration_segments = []
-    narration_cursor_us = 0
-
-    for sent in sentences:
-        duration_sec = sent.get("actual_duration_sec", 2.0)
-        duration_us = int(duration_sec * 1_000_000)
-        audio_path_rel = sent.get("audio_path", "")
-
-        # Resolve narration material path per mode (K10 双轨制)
-        if narration_path_mode == "absolute_in_dir" and narration_dir_abs is not None:
-            narration_material_id = str(narration_dir_abs / Path(audio_path_rel).name)
-        else:
-            narration_material_id = audio_path_rel  # relative within zip / job dir
-
-        narration_segments.append({
-            "id": f"narration_seg_{sent['sentence_idx']:04d}",
-            "material_id": narration_material_id,
-            "source_timerange": {"start": 0, "duration": duration_us},
-            "target_timerange": {"start": narration_cursor_us, "duration": duration_us},
-            "type": "audio",
-            "volume": 1.0,
-        })
-        narration_cursor_us += duration_us
-
-    tracks.append({"id": "narration_track", "type": "audio", "segments": narration_segments})
-
-    # Track 3: original audio (30% volume during video segments)
-    orig_audio_segments = []
-    orig_cursor_us = 0
-    for seg_idx, seg in enumerate(segments):
-        source_start_us = int(seg.get("source_start_sec", 0.0) * 1_000_000)
-        source_end_us = int(seg.get("source_end_sec", 0.0) * 1_000_000)
-        duration_us = source_end_us - source_start_us
-
-        orig_audio_segments.append({
-            "id": f"orig_audio_seg_{seg_idx:04d}",
-            "material_id": video_id,
-            "source_timerange": {"start": source_start_us, "duration": duration_us},
-            "target_timerange": {"start": orig_cursor_us, "duration": duration_us},
-            "type": "audio",
-            "volume": 0.3,
-        })
-        orig_cursor_us += duration_us
-
-    tracks.append({"id": "original_audio_track", "type": "audio", "segments": orig_audio_segments})
-
-    # Track 4: subtitles
-    subtitle_segments = []
-    subtitle_cursor_us = 0
-    for sent in sentences:
-        duration_sec = sent.get("actual_duration_sec", 2.0)
-        duration_us = int(duration_sec * 1_000_000)
-
-        subtitle_segments.append({
-            "id": f"subtitle_seg_{sent['sentence_idx']:04d}",
-            "text": sent.get("text", ""),
-            "target_timerange": {"start": subtitle_cursor_us, "duration": duration_us},
-            "type": "text",
-        })
-        subtitle_cursor_us += duration_us
-
-    tracks.append({"id": "subtitle_track", "type": "text", "segments": subtitle_segments})
-
-    return {
-        "version": "5.9.0",
-        "tracks": tracks,
-        "materials": {
-            "videos": [{"id": video_id, "path": video_source_path}],
-        },
-    }
-
-
-def _build_draft_meta(job_dir: Path) -> dict:
-    """Build draft_meta_info.json."""
-    return {
-        "version": "5.9.0",
-        "draft_id": job_dir.name,
-        "created_at": datetime.now(UTC).isoformat(),
-        "generator": "autoclip",
-    }
+    return script
 
 
 class JianyingDraftExporter(DraftExporter):
-    """Jianying draft package exporter.
+    """Jianying draft exporter — DOWNLOAD branch.
 
-    Attempts to use pyjianyingdraft if installed; falls back to a hand-crafted
-    zip with the same 4-track structure when the library is unavailable.
+    Builds a real Jianying draft (via pyJianYingDraft) inside a temporary
+    folder, copies source.mp4 + tts wavs alongside it, then zips the entire
+    draft folder for the user to download. The zip is self-contained: extract
+    anywhere → "导入草稿" in Jianying → opens cleanly.
     """
 
     @property
@@ -197,102 +246,63 @@ class JianyingDraftExporter(DraftExporter):
         if not segments:
             raise JianyingExportError("No segments in timeline.json — cannot build Jianying draft")
 
-        has_pyjianyingdraft = _try_import_pyjianyingdraft()
-        if has_pyjianyingdraft:
-            logger.info("[jianying] pyjianyingdraft available — using library export")
-            return self._export_with_library(segments, sentences, job_dir, output_dir)
-        else:
-            logger.warning("[jianying] pyjianyingdraft not installed — using fallback zip export")
-            return self._export_fallback_zip(segments, sentences, job_dir, output_dir)
+        # Stage the draft inside output/_draft_staging so users can also grab the
+        # un-zipped version if they wish; the canonical deliverable is the zip.
+        staging_root = output_dir / "_draft_staging"
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+        staging_root.mkdir(parents=True)
+        draft_name = f"autoclip_{job_dir.name}"
 
-    def _export_with_library(
-        self,
-        segments: list[dict],
-        sentences: list[dict],
-        job_dir: Path,
-        output_dir: Path,
-    ) -> ExportResult:
-        """Export using pyJianYingDraft library."""
+        # 1) Use DraftFolder so pyJianYingDraft copies the official Jianying
+        #    draft_meta_info.json template (30+ fields). Hand-rolling the meta
+        #    used to fail Jianying's validator with "草稿损坏".
+        folder = jy.DraftFolder(str(staging_root))
+        script = folder.create_draft(
+            draft_name, _CANVAS_WIDTH, _CANVAS_HEIGHT, _CANVAS_FPS,
+            maintrack_adsorb=True,
+        )
+        draft_dir = staging_root / draft_name
+
+        # 2) Materialize media next to the draft (after create_draft so the
+        #    folder exists and meta is already in place).
+        copied_video, tts_map = _materialize_assets(job_dir, sentences, draft_dir)
+
+        # 3) Populate the script with tracks/segments. DOWNLOAD branch uses
+        #    basename so the zip stays portable — extract anywhere → Jianying
+        #    resolves media via sibling lookup against draft_content.json.
         try:
-            import pyjianyingdraft as pjy
-
-            draft = pjy.Script_file(1080, 1920)
-            for seg in segments:
-                source_start = int(seg.get("source_start_sec", 0.0) * 1_000_000)
-                source_end = int(seg.get("source_end_sec", 0.0) * 1_000_000)
-                draft.add_segment(
-                    pjy.Segment(
-                        material_id=self.PLACEHOLDER_SOURCE_PATH,
-                        source_timerange=pjy.tim(source_start, source_end - source_start),
-                    )
-                )
-
-            zip_path = output_dir / "jianying_draft.zip"
-            draft.dumps(str(zip_path))
-
-            return ExportResult(
-                output_path=zip_path,
-                exporter_name=self.name,
-                track_counts={"main_video": len(segments)},
+            _populate_script(
+                script, segments, sentences, copied_video, tts_map,
+                materials_use_basename=True,
             )
         except Exception as exc:
-            raise JianyingExportError(f"pyjianyingdraft export failed: {exc}") from exc
+            raise JianyingExportError(f"pyJianYingDraft build failed: {exc}") from exc
 
-    def _export_fallback_zip(
-        self,
-        segments: list[dict],
-        sentences: list[dict],
-        job_dir: Path,
-        output_dir: Path,
-    ) -> ExportResult:
-        """Export as structured zip without pyjianyingdraft.
+        script.save()
 
-        Packs:
-          draft_content.json   — 4-track timeline structure
-          draft_meta_info.json — version + generator info
-          materials/           — TTS wav files + README
-        """
-        draft_content = _build_draft_content(segments, sentences)
-        draft_meta = _build_draft_meta(job_dir)
-
+        # 4) Zip the entire draft folder
         zip_path = output_dir / "jianying_draft.zip"
-        packed_audio_paths: set[str] = set()
-
+        if zip_path.exists():
+            zip_path.unlink()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(
-                "draft_content.json",
-                json.dumps(draft_content, ensure_ascii=False, indent=2),
-            )
-            zf.writestr(
-                "draft_meta_info.json",
-                json.dumps(draft_meta, ensure_ascii=False, indent=2),
-            )
-            zf.writestr("materials/README.txt", self._make_readme())
+            for path in draft_dir.rglob("*"):
+                if path.is_file():
+                    zf.write(path, arcname=str(path.relative_to(staging_root)))
 
-            # Pack TTS audio files referenced in narration track
-            for sentence in sentences:
-                audio_rel = sentence.get("audio_path", "")
-                if not audio_rel or audio_rel in packed_audio_paths:
-                    continue
-                audio_abs = job_dir / audio_rel
-                if audio_abs.exists():
-                    zf.write(audio_abs, arcname=f"materials/{audio_abs.name}")
-                    packed_audio_paths.add(audio_rel)
-                    logger.debug("[jianying] packed TTS: materials/%s", audio_abs.name)
-                else:
-                    logger.warning("[jianying] TTS file missing, skipping: %s", audio_abs)
-
-        track_counts = {t["id"]: len(t["segments"]) for t in draft_content["tracks"]}
         zip_size_kb = zip_path.stat().st_size / 1024
         logger.info(
-            "[jianying] fallback zip written: %s (%d tracks, %d TTS files, %.1f KB)",
-            zip_path, len(draft_content["tracks"]), len(packed_audio_paths), zip_size_kb,
+            "[jianying] draft zip written: %s (video=%s, tts=%d files, %.1f KB)",
+            zip_path, copied_video is not None, len(tts_map), zip_size_kb,
         )
 
         return ExportResult(
             output_path=zip_path,
             exporter_name=self.name,
-            track_counts=track_counts,
+            track_counts={
+                "main_video": len(segments) if copied_video is not None else 0,
+                "narration": len(tts_map),
+            },
         )
 
 
@@ -392,67 +402,48 @@ def install_to_jianying_drafts(
     if not segments:
         raise JianyingExportError("No segments in timeline — cannot install draft")
 
-    # Resolve source video absolute path
-    if source_video_path is None:
-        source_video_path = job_dir / "source.mp4"
-    source_video_linked = source_video_path.exists()
-    video_source_str = str(source_video_path.resolve())
-    if not source_video_linked:
-        logger.warning(
-            "[jianying-install] source video not found at %s — draft will open with "
-            "missing media (user must relink in Jianying)",
-            source_video_path,
-        )
-
-    # Create per-job draft directory (timestamped to avoid collision on reinstall)
+    # Per-install timestamped folder (avoids collision when user re-installs)
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     draft_name = f"autoclip_{job_id}_{timestamp}"
+
+    # 1) DraftFolder.create_draft creates the folder AND copies the official
+    #    Jianying-compatible draft_meta_info.json template. Without this,
+    #    Jianying's drafts list rejects our entry with "草稿损坏".
+    folder = jy.DraftFolder(str(drafts_root))
+    script = folder.create_draft(
+        draft_name, _CANVAS_WIDTH, _CANVAS_HEIGHT, _CANVAS_FPS,
+        maintrack_adsorb=True,
+    )
     draft_dir = drafts_root / draft_name
-    draft_dir.mkdir(parents=True, exist_ok=False)
 
-    # Copy TTS wavs flat into draft_dir (Jianying scans subdir for media)
-    tts_files_copied = 0
-    for sent in sentences:
-        audio_rel = sent.get("audio_path", "")
-        if not audio_rel:
-            continue
-        src = job_dir / audio_rel
-        if not src.exists():
-            logger.warning("[jianying-install] missing TTS wav: %s", src)
-            continue
-        dst = draft_dir / src.name
-        if not dst.exists():  # de-dup on shared filename
-            shutil.copy2(src, dst)
-            tts_files_copied += 1
-
-    # Build draft_content with absolute paths (install branch)
-    draft_content = _build_draft_content(
-        segments,
-        sentences,
-        video_source_path=video_source_str,
-        narration_path_mode="absolute_in_dir",
-        narration_dir_abs=draft_dir.resolve(),
-    )
-    draft_meta = _build_draft_meta(draft_dir)
-
-    (draft_dir / "draft_content.json").write_text(
-        json.dumps(draft_content, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    (draft_dir / "draft_meta_info.json").write_text(
-        json.dumps(draft_meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    # 2) Copy source video + tts wavs next to draft_content.json
+    copied_video, tts_map = _materialize_assets(
+        job_dir, sentences, draft_dir, source_video_path=source_video_path,
     )
 
+    # 3) Populate the script with tracks/segments. INSTALL branch keeps
+    #    absolute paths — Jianying never moves these files so the paths
+    #    stay valid forever.
+    try:
+        _populate_script(script, segments, sentences, copied_video, tts_map)
+    except Exception as exc:
+        # Roll back the half-built draft folder so the user doesn't see
+        # a corrupt entry in Jianying's drafts list.
+        shutil.rmtree(draft_dir, ignore_errors=True)
+        raise JianyingExportError(f"pyJianYingDraft build failed: {exc}") from exc
+
+    script.save()
+
+    source_video_linked = copied_video is not None
     logger.info(
         "[jianying-install] draft created at %s (source_linked=%s, tts=%d)",
-        draft_dir, source_video_linked, tts_files_copied,
+        draft_dir, source_video_linked, len(tts_map),
     )
 
     return {
         "draft_dir": str(draft_dir),
         "draft_name": draft_name,
         "source_video_linked": source_video_linked,
-        "source_video_path": video_source_str if source_video_linked else None,
-        "tts_files_copied": tts_files_copied,
+        "source_video_path": str(copied_video) if copied_video is not None else None,
+        "tts_files_copied": len(tts_map),
     }

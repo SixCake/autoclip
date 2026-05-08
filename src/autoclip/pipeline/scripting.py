@@ -56,7 +56,7 @@ from autoclip.algo.hook_generator import (
     HookCandidatesResult,
     generate_hook_candidates,
 )
-from autoclip.algo.narrative_ir import Character, KeyAct, NarrativeIR, PlotOutline
+from autoclip.algo.narrative_ir import KeyAct, NarrativeIR, PlotOutline
 from autoclip.algo.persona_inferer import (
     PersonaInferenceResult,
     extract_reference_lines,

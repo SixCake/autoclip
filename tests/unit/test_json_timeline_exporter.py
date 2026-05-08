@@ -7,8 +7,6 @@ import re
 import zipfile
 from pathlib import Path
 
-import pytest
-
 from autoclip.exporters.json_timeline import JsonTimelineExporter
 
 _SAMPLE_TIMELINE = {

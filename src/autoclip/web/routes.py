@@ -9,11 +9,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
 
 from ..config import get_settings
 from ..db import session_scope
-from ..models import Job, JobStatus
-from sqlalchemy import select
+from ..models import Job
 
 router = APIRouter(tags=["web"])
 
